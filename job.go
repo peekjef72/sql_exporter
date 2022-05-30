@@ -3,8 +3,10 @@ package sql_exporter
 import (
 	"fmt"
 
-	"github.com/free/sql_exporter/config"
-	"github.com/free/sql_exporter/errors"
+	"sql_exporter/config"
+	// "sql_exporter/errors"
+
+	"github.com/go-kit/log"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
@@ -17,15 +19,17 @@ type Job interface {
 type job struct {
 	config     *config.JobConfig
 	targets    []Target
-	logContext string
+	logContext []interface{}
 }
 
 // NewJob returns a new Job with the given configuration.
-func NewJob(jc *config.JobConfig, gc *config.GlobalConfig) (Job, errors.WithContext) {
+func NewJob(jc *config.JobConfig, gc *config.GlobalConfig, logger log.Logger) (Job, error) {
+	var logContext []interface{}
+	logContext = append(logContext, "job", jc.Name)
 	j := job{
 		config:     jc,
 		targets:    make([]Target, 0, 10),
-		logContext: fmt.Sprintf("job=%q", jc.Name),
+		logContext: logContext,
 	}
 
 	for _, sc := range jc.StaticConfigs {
@@ -37,11 +41,14 @@ func NewJob(jc *config.JobConfig, gc *config.GlobalConfig) (Job, errors.WithCont
 			for name, value := range sc.Labels {
 				// Shouldn't happen as there are sanity checks in config, but check nonetheless.
 				if _, found := constLabels[name]; found {
-					return nil, errors.Errorf(j.logContext, "duplicate label %q", name)
+					var logContext []interface{}
+					logContext = append(logContext, j.logContext...)
+					logContext = append(logContext, "errmsg", fmt.Sprintf("duplicate label %q", name))
+					return nil, fmt.Errorf("%s", logContext...)
 				}
 				constLabels[name] = value
 			}
-			t, err := NewTarget(j.logContext, tname, string(dsn), jc.Collectors(), constLabels, gc)
+			t, err := NewTarget(j.logContext, tname, string(dsn), jc.Collectors(), constLabels, gc, logger)
 			if err != nil {
 				return nil, err
 			}
