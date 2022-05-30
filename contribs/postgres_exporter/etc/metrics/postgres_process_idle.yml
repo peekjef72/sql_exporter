@@ -1,0 +1,53 @@
+collector_name: pg_postmaster
+# namespace: pg
+metrics:
+  - metric_name: start_time_seconds
+    help: Time at which postmaster started
+    type: histogram
+    key_labels:
+      - state
+      - application_name
+    values:
+      - ts
+    query_ref: proc_idel
+
+queries:
+  - query_name: proc_idle
+    query: |
+      WITH
+        metrics AS (
+          SELECT
+          state,
+          application_name,
+          SUM(EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - state_change))::bigint)::float AS process_idle_seconds_sum,
+          COUNT(*) AS process_idle_seconds_count
+          FROM pg_stat_activity
+          WHERE state ~ '^idle'
+          GROUP BY state, application_name
+        ),
+        buckets AS (
+          SELECT
+          state,
+          application_name,
+          le,
+          SUM(
+            CASE WHEN EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - state_change)) <= le
+            THEN 1
+            ELSE 0
+            END
+          )::bigint AS bucket
+          FROM
+          pg_stat_activity,
+          UNNEST(ARRAY[1, 2, 5, 15, 30, 60, 90, 120, 300]) AS le
+          GROUP BY state, application_name, le
+          ORDER BY state, application_name, le
+        )
+        SELECT
+        state,
+        application_name,
+        process_idle_seconds_sum as seconds_sum,
+        process_idle_seconds_count as seconds_count,
+        ARRAY_AGG(le) AS seconds,
+        ARRAY_AGG(bucket) AS seconds_bucket
+        FROM metrics JOIN buckets USING (state, application_name)
+        GROUP BY 1, 2, 3, 4

@@ -1,0 +1,10 @@
+collector_name: pg_postmaster
+# namespace: pg
+metrics:
+  - metric_name: start_time_seconds
+    help: Time at which postmaster started
+    type: gauge
+    values:
+      - ts
+    query: |
+      SELECT extract(epoch from pg_postmaster_start_time) as ts from pg_postmaster_start_time()

@@ -1,0 +1,219 @@
+# from 
+# https://github.com/prometheus-community/postgres_exporter/blob/master/collector/pg_database.go
+# https://github.com/prometheus-community/postgres_exporter/blob/master/collector/pg_stat_database.go
+
+collector_name: pg_databases
+# namespace: pg
+metrics:
+  - metric_name: numbackends
+    help: |
+      Number of backends currently connected to this database.
+      This is the only column in this view that returns a value reflecting current state;
+      all other columns return the accumulated values since the last reset.
+    type: gauge
+    key_labels:
+      - datid
+      - datname
+    values:
+      - numbackends
+    query_ref: stat_database
+
+  - metric_name: xact_commit
+    help: Number of transactions in this database that have been committed
+    type: counter
+    key_labels:
+      - datid
+      - datname
+    values:
+      - xact_commit
+    query_ref: stat_database
+
+  - metric_name: xact_rollback
+    help: Number of transactions in this database that have been rolled back
+    type: counter
+    key_labels:
+      - datid
+      - datname
+    values:
+      - xact_rollback
+    query_ref: stat_database
+
+  - metric_name: blks_read
+    help: Number of disk blocks read in this database
+    type: counter
+    key_labels:
+      - datid
+      - datname
+    values:
+      - blks_read
+    query_ref: stat_database
+
+  - metric_name: blks_hit
+    help: |
+      Number of times disk blocks were found already in the buffer cache, so that a read was not necessary (this only includes hits in the PostgreSQL buffer cache, not the operating system's file system cache)
+    type: counter
+    key_labels:
+      - datid
+      - datname
+    values:
+      - blks_hit
+    query_ref: stat_database
+
+  - metric_name: tup_returned
+    help: Number of rows returned by queries in this database
+    type: counter
+    key_labels:
+      - datid
+      - datname
+    values:
+      - tup_returned
+    query_ref: stat_database
+
+  - metric_name: tup_fetched
+    help: Number of rows fetched by queries in this database
+    type: counter
+    key_labels:
+      - datid
+      - datname
+    values:
+      - tup_fetched
+    query_ref: stat_database
+
+  - metric_name: tup_inserted
+    help: Number of rows inserted by queries in this database
+    type: counter
+    key_labels:
+      - datid
+      - datname
+    values:
+      - tup_inserted
+    query_ref: stat_database
+
+  - metric_name: tup_updated
+    help: Number of rows updated by queries in this database
+    type: counter
+    key_labels:
+      - datid
+      - datname
+    values:
+      - tup_updated
+    query_ref: stat_database
+
+  - metric_name: tup_deleted
+    help: Number of rows deleted by queries in this database
+    type: counter
+    key_labels:
+      - datid
+      - datname
+    values:
+      - tup_deleted
+    query_ref: stat_database
+
+  - metric_name: conflicts
+    help: Number of queries canceled due to conflicts with recovery in this database. (Conflicts occur only on standby servers; see pg_stat_database_conflicts for details.)
+    type: counter
+    key_labels:
+      - datid
+      - datname
+    values:
+      - conflicts
+    query_ref: stat_database
+
+  - metric_name: temp_files
+    help: Number of temporary files created by queries in this database. All temporary files are counted, regardless of why the temporary file was created (e.g., sorting or hashing), and regardless of the log_temp_files setting.
+    type: counter
+    key_labels:
+      - datid
+      - datname
+    values:
+      - temp_files
+    query_ref: stat_database
+
+  - metric_name: temp_bytes
+    help: Total amount of data written to temporary files by queries in this database. All temporary files are counted, regardless of why the temporary file was created, and regardless of the log_temp_files setting.
+    type: counter
+    key_labels:
+      - datid
+      - datname
+    values:
+      - temp_bytes
+    query_ref: stat_database
+
+  - metric_name: deadlocks
+    help: Number of deadlocks detected in this database
+    type: counter
+    key_labels:
+      - datid
+      - datname
+    values:
+      - deadlocks
+    query_ref: stat_database
+
+  - metric_name: blk_read_time
+    help: Time spent reading data file blocks by backends in this database, in milliseconds
+    type: counter
+    key_labels:
+      - datid
+      - datname
+    values:
+      - blk_read_time
+    query_ref: stat_database
+
+  - metric_name: blk_write_time
+    help: Time spent writing data file blocks by backends in this database, in milliseconds
+    type: counter
+    key_labels:
+      - datid
+      - datname
+    values:
+      - blk_write_time
+    query_ref: stat_database
+
+  - metric_name: stats_reset
+    help: Time at which these statistics were last reset
+    type: counter
+    key_labels:
+      - datid
+      - datname
+    values:
+      - stats_reset
+    query_ref: stat_database
+
+  - metric_name: active_time_seconds_total
+    help: Time spent executing SQL statements in this database, in seconds
+    type: counter
+    key_labels:
+      - datid
+      - datname
+    values:
+      - active_time
+    when:
+      - config.version >= 14
+    query_ref: stat_database
+
+queries:
+  - query_name: stat_database
+    query: |
+      SELECT 
+		    datid,
+		    datname,
+		    numbackends,
+		    xact_commit,
+		    xact_rollback,
+		    blks_read,
+		    blks_hit,
+		    tup_returned,
+		    tup_fetched,
+		    tup_inserted,
+		    tup_updated,
+		    tup_deleted,
+		    conflicts,
+		    temp_files,
+		    temp_bytes,
+		    deadlocks,
+		    blk_read_time,
+		    blk_write_time,
+		    stats_reset,
+# only for pb vers >= 14
+        active_time/1000.0 
+      FROM pg_stat_database;

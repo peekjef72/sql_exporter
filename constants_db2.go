@@ -1,4 +1,4 @@
-//go:build db2 && !hana && !mssql && !oracle
+//go:build db2 && !hana && !mssql && !oracle && !postgres
 
 package main
 
