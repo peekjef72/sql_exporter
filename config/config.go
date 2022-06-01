@@ -1,27 +1,32 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"path/filepath"
 	"strings"
 	"time"
 
-	log "github.com/golang/glog"
+	"github.com/go-kit/log"
+	"github.com/go-kit/log/level"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/model"
 	"gopkg.in/yaml.v2"
 )
 
 // Load attempts to parse the given config file and return a Config object.
-func Load(configFile string) (*Config, error) {
-	log.Infof("Loading configuration from %s", configFile)
+func Load(configFile string, logger log.Logger) (*Config, error) {
+	level.Info(logger).Log("msg", fmt.Sprintf("Loading configuration from %s", configFile))
 	buf, err := ioutil.ReadFile(configFile)
 	if err != nil {
 		return nil, err
 	}
 
-	c := Config{configFile: configFile}
+	c := Config{
+		configFile: configFile,
+		logger:     logger,
+	}
 	err = yaml.Unmarshal(buf, &c)
 	if err != nil {
 		return nil, err
@@ -34,15 +39,15 @@ func Load(configFile string) (*Config, error) {
 // Top-level config
 //
 
-// Config is a collection of jobs and collectors.
+// Config is a collection of targets and collectors.
 type Config struct {
 	Globals        *GlobalConfig      `yaml:"global"`
 	CollectorFiles []string           `yaml:"collector_files,omitempty"`
-	Target         *TargetConfig      `yaml:"target,omitempty"`
-	Jobs           []*JobConfig       `yaml:"jobs,omitempty"`
+	Targets        []*TargetConfig    `yaml:"targets,omitempty"`
 	Collectors     []*CollectorConfig `yaml:"collectors,omitempty"`
 
 	configFile string
+	logger     log.Logger
 
 	// Catches all undefined fields and must be empty after parsing.
 	XXX map[string]interface{} `yaml:",inline" json:"-"`
@@ -55,8 +60,8 @@ func (c *Config) UnmarshalYAML(unmarshal func(interface{}) error) error {
 		return err
 	}
 
-	if (len(c.Jobs) == 0) == (c.Target == nil) {
-		return fmt.Errorf("exactly one of `jobs` and `target` must be defined")
+	if len(c.Targets) == 0 {
+		return fmt.Errorf("at least one target in `targets` must be defined")
 	}
 
 	// Load any externally defined collectors.
@@ -76,19 +81,42 @@ func (c *Config) UnmarshalYAML(unmarshal func(interface{}) error) error {
 		}
 		colls[coll.Name] = coll
 	}
-	if c.Target != nil {
-		cs, err := resolveCollectorRefs(c.Target.CollectorRefs, colls, "target")
-		if err != nil {
-			return err
+	for _, t := range c.Targets {
+		if len(t.TargetsFiles) > 0 {
+			err := c.loadTargetsFiles(t.TargetsFiles)
+			if err != nil {
+				return err
+			}
 		}
-		c.Target.collectors = cs
 	}
-	for _, j := range c.Jobs {
-		cs, err := resolveCollectorRefs(j.CollectorRefs, colls, fmt.Sprintf("job %q", j.Name))
+
+	for _, t := range c.Targets {
+		cs, err := resolveCollectorRefs(t.CollectorRefs, colls, fmt.Sprintf("target %q", t.Name))
 		if err != nil {
 			return err
 		}
-		j.collectors = cs
+		t.collectors = cs
+	}
+
+	// Check for empty/duplicate target names/data source names
+	tnames := make(map[string]interface{})
+	dsns := make(map[string]interface{})
+	for _, t := range c.Targets {
+		if len(t.TargetsFiles) > 0 {
+			continue
+		}
+		if t.Name == "" {
+			return fmt.Errorf("empty target name in static config %+v", t)
+		}
+		if _, ok := tnames[t.Name]; ok {
+			return fmt.Errorf("duplicate target name %q in target %+v", t.Name, t)
+		}
+		tnames[t.Name] = nil
+
+		if _, ok := dsns[string(t.DSN)]; ok {
+			return fmt.Errorf("duplicate data source definition %q in target %+v", t.Name, t)
+		}
+		dsns[string(t.DSN)] = nil
 	}
 
 	return checkOverflow(c.XXX, "config")
@@ -128,7 +156,45 @@ func (c *Config) loadCollectorFiles() error {
 				return err
 			}
 			c.Collectors = append(c.Collectors, &cc)
-			log.Infof("Loaded collector %q from %s", cc.Name, cf)
+			level.Info(c.logger).Log("msg", fmt.Sprintf("Loaded collector %q from %s", cc.Name, cf))
+		}
+	}
+
+	return nil
+}
+
+// loadTargetsFiles resolves all targets file globs to files and loads the targets they define.
+func (c *Config) loadTargetsFiles(targetFilepath []string) error {
+	baseDir := filepath.Dir(c.configFile)
+	for _, tfglob := range targetFilepath {
+		// Resolve relative paths by joining them to the configuration file's directory.
+		if len(tfglob) > 0 && !filepath.IsAbs(tfglob) {
+			tfglob = filepath.Join(baseDir, tfglob)
+		}
+
+		// Resolve the glob to actual filenames.
+		tfs, err := filepath.Glob(tfglob)
+		if err != nil {
+			// The only error can be a bad pattern.
+			return fmt.Errorf("error resolving collector files for %s: %s", tfglob, err)
+		}
+
+		// And load the CollectorConfig defined in each file.
+		for _, tf := range tfs {
+			level.Debug(c.logger).Log("msg", fmt.Sprintf("Loading targets from %s", tf))
+			buf, err := ioutil.ReadFile(tf)
+			if err != nil {
+				return err
+			}
+
+			target := TargetConfig{}
+			err = yaml.Unmarshal(buf, &target)
+			if err != nil {
+				return err
+			}
+			target.setFromFile(tf)
+			c.Targets = append(c.Targets, &target)
+			level.Info(c.logger).Log("msg", fmt.Sprintf("Loaded target %q from %s", target.Name, tf))
 		}
 	}
 
@@ -171,15 +237,19 @@ func (g *GlobalConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 }
 
 //
-// Target
+// Targets
 //
 
 // TargetConfig defines a DSN and a set of collectors to be executed on it.
 type TargetConfig struct {
-	DSN           Secret   `yaml:"data_source_name"` // data source name to connect to
-	CollectorRefs []string `yaml:"collectors"`       // names of collectors to execute on the target
+	Name          string            `yaml:"name"`                    // data source name to connect to
+	DSN           Secret            `yaml:"data_source_name"`        // data source definition to connect to
+	Labels        map[string]string `yaml:"labels,omitempty"`        // labels to apply to all metrics collected from the targets
+	CollectorRefs []string          `yaml:"collectors"`              // names of collectors to execute on the target
+	TargetsFiles  []string          `yaml:"targets_files,omitempty"` // slice of path and pattern for files that contains targets
 
 	collectors []*CollectorConfig // resolved collector references
+	fromFile   string             // filepath if loaded from targets_files pattern
 
 	// Catches all undefined fields and must be empty after parsing.
 	XXX map[string]interface{} `yaml:",inline" json:"-"`
@@ -190,123 +260,64 @@ func (t *TargetConfig) Collectors() []*CollectorConfig {
 	return t.collectors
 }
 
+// set fromFile for target when read from targets_files directive
+func (t *TargetConfig) setFromFile(file_path string) {
+	t.fromFile = file_path
+}
+
 // UnmarshalYAML implements the yaml.Unmarshaler interface for TargetConfig.
 func (t *TargetConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	type plain TargetConfig
 	if err := unmarshal((*plain)(t)); err != nil {
 		return err
 	}
-
 	// Check required fields
-	if t.DSN == "" {
-		return fmt.Errorf("missing data_source_name for target %+v", t)
-	}
-	checkCollectorRefs(t.CollectorRefs, "target")
 
+	if len(t.TargetsFiles) == 0 {
+		if t.Name == "" {
+			return fmt.Errorf("empty target name in target %+v", t)
+		}
+
+		if t.DSN == "" {
+			return fmt.Errorf("missing data_source_name for target %+v", t)
+		}
+		checkCollectorRefs(t.CollectorRefs, "target")
+
+		if len(t.Labels) > 0 {
+			err := t.checkLabelCollisions()
+			if err != nil {
+				return err
+			}
+		}
+	} else {
+		for _, file := range t.TargetsFiles {
+			if file == "" {
+				return fmt.Errorf("missing targets_files pattern")
+			}
+		}
+	}
 	return checkOverflow(t.XXX, "target")
 }
 
-//
-// Jobs
-//
-
-// JobConfig defines a set of collectors to be executed on a set of targets.
-type JobConfig struct {
-	Name          string          `yaml:"job_name"`       // name of this job
-	CollectorRefs []string        `yaml:"collectors"`     // names of collectors to apply to all targets in this job
-	StaticConfigs []*StaticConfig `yaml:"static_configs"` // collections of statically defined targets
-
-	collectors []*CollectorConfig // resolved collector references
-
-	// Catches all undefined fields and must be empty after parsing.
-	XXX map[string]interface{} `yaml:",inline" json:"-"`
-}
-
-// Collectors returns the collectors referenced by the job, resolved.
-func (j *JobConfig) Collectors() []*CollectorConfig {
-	return j.collectors
-}
-
-// UnmarshalYAML implements the yaml.Unmarshaler interface for JobConfig.
-func (j *JobConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
-	type plain JobConfig
-	if err := unmarshal((*plain)(j)); err != nil {
-		return err
-	}
-
-	// Check required fields
-	if j.Name == "" {
-		return fmt.Errorf("missing name for job %+v", j)
-	}
-	checkCollectorRefs(j.CollectorRefs, fmt.Sprintf("job %q", j.Name))
-
-	if len(j.StaticConfigs) == 0 {
-		return fmt.Errorf("no targets defined for job %q", j.Name)
-	}
-
-	return checkOverflow(j.XXX, "job")
-}
-
 // checkLabelCollisions checks for label collisions between StaticConfig labels and Metric labels.
-func (j *JobConfig) checkLabelCollisions() error {
+func (t *TargetConfig) checkLabelCollisions() error {
 	sclabels := make(map[string]interface{})
-	for _, s := range j.StaticConfigs {
-		for _, l := range s.Labels {
-			sclabels[l] = nil
-		}
+	for _, l := range t.Labels {
+		sclabels[l] = nil
 	}
 
-	for _, c := range j.collectors {
+	for _, c := range t.collectors {
 		for _, m := range c.Metrics {
 			for _, l := range m.KeyLabels {
 				if _, ok := sclabels[l]; ok {
 					return fmt.Errorf(
-						"label collision in job %q: label %q is defined both by a static_config and by metric %q of collector %q",
-						j.Name, l, m.Name, c.Name)
+						"label collision in target %q: label %q is defined both by a static_config and by metric %q of collector %q",
+						t.Name, l, m.Name, c.Name)
 				}
 			}
 		}
 	}
 	return nil
-}
-
-// StaticConfig defines a set of targets and optional labels to apply to the metrics collected from them.
-type StaticConfig struct {
-	Targets map[string]Secret `yaml:"targets"`          // map of target names to data source names
-	Labels  map[string]string `yaml:"labels,omitempty"` // labels to apply to all metrics collected from the targets
-
-	// Catches all undefined fields and must be empty after parsing.
-	XXX map[string]interface{} `yaml:",inline" json:"-"`
-}
-
-// UnmarshalYAML implements the yaml.Unmarshaler interface for StaticConfig.
-func (s *StaticConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
-	type plain StaticConfig
-	if err := unmarshal((*plain)(s)); err != nil {
-		return err
-	}
-
-	// Check for empty/duplicate target names/data source names
-	tnames := make(map[string]interface{})
-	dsns := make(map[string]interface{})
-	for tname, dsn := range s.Targets {
-		if tname == "" {
-			return fmt.Errorf("empty target name in static config %+v", s)
-		}
-		if _, ok := tnames[tname]; ok {
-			return fmt.Errorf("duplicate target name %q in static_config %+v", tname, s)
-		}
-		tnames[tname] = nil
-		if dsn == "" {
-			return fmt.Errorf("empty data source name in static config %+v", s)
-		}
-		if _, ok := dsns[string(dsn)]; ok {
-			return fmt.Errorf("duplicate data source name %q in static_config %+v", tname, s)
-		}
-		dsns[string(dsn)] = nil
-	}
-
-	return checkOverflow(s.XXX, "static_config")
 }
 
 //
@@ -545,4 +556,24 @@ func checkOverflow(m map[string]interface{}, ctx string) error {
 		return fmt.Errorf("unknown fields in %s: %s", ctx, strings.Join(keys, ", "))
 	}
 	return nil
+}
+
+func ErrorWrap(logContext []interface{}, err error) error {
+	var logCtx []interface{}
+	var ErrMissingValue = errors.New("(MISSING)")
+
+	if err == nil {
+		return nil
+	}
+	logCtx = append(logCtx, logContext...)
+	logCtx = append(logCtx, "errmsg", fmt.Sprintf("%q", err))
+
+	if len(logCtx)%2 != 0 {
+		logCtx = append(logCtx, ErrMissingValue)
+	}
+	tmp := make(map[interface{}]interface{}, len(logCtx)/2+1)
+	for i := 0; i < len(logCtx); i += 2 {
+		tmp[logCtx[i]] = logCtx[i+1]
+	}
+	return fmt.Errorf("%v", tmp)
 }

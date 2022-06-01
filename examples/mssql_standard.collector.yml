@@ -11,6 +11,26 @@ collector_name: mssql_standard
 #min_interval: 0s
 
 metrics:
+  - metric_name: mssql_version
+    help: 'version, edition, instance, chartset and sortorder server properties as labels: value 1'
+    type: gauge
+    values: [value]
+    key_labels:
+      - version
+      - edition
+      - config_instance
+      - chartset
+      - sortorder
+      - maxconnection
+    query: |
+      select SERVERPROPERTY('ProductVersion') as version,
+      SERVERPROPERTY('Edition') as edition,
+      SERVERPROPERTY('InstanceName') as config_instance,
+      SERVERPROPERTY('SqlCharSetName') as chartset,
+      SERVERPROPERTY('SqlSortOrderName') as sortorder,
+      @@MAX_CONNECTIONS as maxconnection,
+      1 as value
+
   - metric_name: mssql_local_time_seconds
     type: gauge
     help: 'Local time in seconds since epoch (Unix time).'
@@ -18,16 +38,29 @@ metrics:
     query: |
       SELECT DATEDIFF(second, '19700101', GETUTCDATE()) AS unix_time
 
+  - metric_name: mssql_start_timestamp
+    help: "server start timestamp (unix epoch) in second"
+    type: gauge
+    values: [unix_time]
+    query: |
+      SELECT DATEDIFF(second, '19700101', login_time) as unix_time 
+      FROM sys.sysprocesses 
+      where spid=1
+
   - metric_name: mssql_connections
     type: gauge
     help: 'Number of active connections.'
     key_labels:
       - db
+      - status
     values: [count]
     query: |
-      SELECT DB_NAME(sp.dbid) AS db, COUNT(sp.spid) AS count
+      SELECT 
+        DB_NAME(sp.dbid) AS db,
+        sp.status as status,
+        COUNT(sp.spid) AS count
       FROM sys.sysprocesses sp
-      GROUP BY DB_NAME(sp.dbid)
+      GROUP BY DB_NAME(sp.dbid), status
 
   #
   # Collected from sys.dm_os_performance_counters
@@ -90,12 +123,15 @@ metrics:
 
   - metric_name: mssql_buffer_cache_hit_ratio
     type: gauge
-    help: 'Ratio of requests that hit the buffer cache'
-    values: [cntr_value]
+    help: 'Ratio of requests that hit the buffer cache (type hit), total request (type tot_req)'
+    values: [hit, tot_req]
+    value_label: 'type'
     query: |
-      SELECT cntr_value
-      FROM sys.dm_os_performance_counters
-      WHERE [counter_name] = 'Buffer cache hit ratio'
+      SELECT a.cntr_value as hit,
+        b.cntr_value as tot_req
+      FROM sys.dm_os_performance_counters a WITH (NOLOCK), sys.dm_os_performance_counters b WITH (NOLOCK)
+      WHERE a.counter_name = 'Buffer cache hit ratio base'
+      and b.counter_name = 'Buffer cache hit ratio'
 
   - metric_name: mssql_checkpoint_pages_sec
     type: gauge
@@ -158,34 +194,117 @@ metrics:
   #
   # Collected from sys.dm_os_sys_memory
   #
-  - metric_name: mssql_os_memory
+  - metric_name: mssql_os_memory_bytes
     type: gauge
-    help: 'OS physical memory, used and available.'
+    help: 'OS physical memory, used and available in bytes.'
     value_label: 'state'
-    values: [used, available]
+    values: [used, available, total]
     query: |
       SELECT
         (total_physical_memory_kb - available_physical_memory_kb) * 1024 AS used,
-        available_physical_memory_kb * 1024 AS available
+        available_physical_memory_kb * 1024 AS available,
+        total_physical_memory_kb * 1024 AS total
       FROM sys.dm_os_sys_memory
 
-  - metric_name: mssql_os_page_file
+  - metric_name: mssql_os_page_file_bytes
     type: gauge
-    help: 'OS page file, used and available.'
+    help: 'OS page file, used and available in bytes.'
     value_label: 'state'
-    values: [used, available]
+    values: [used, available, total]
     query: |
       SELECT
         (total_page_file_kb - available_page_file_kb) * 1024 AS used,
-        available_page_file_kb * 1024 AS available
+        available_page_file_kb * 1024 AS available,
+        total_page_file_kb * 1024 AS total
       FROM sys.dm_os_sys_memory
+  
+  - metric_name: mssql_database_state
+    type: gauge
+    help: "Database state: 0=ONLINE 1=RESTORING 2=RECOVERING 3=RECOVERY_PENDING 4=SUSPECT 5=EMERGENCY 6=OFFLINE 7=COPYING 10=OFFLINE_SECONDARY"
+    query: |
+      SELECT name as db, state FROM master.sys.databases
+    values: [state]
+    key_labels:
+      - db
+
+  - metric_name: mssql_database_filesize_bytes
+    type: gauge
+    help: Physical sizes of files used by database in bytes, their names and types (0=rows, 1=log, 2=filestream,3=n/a 4=fulltext(before v2008 of MSSQL))
+    query: |
+      SELECT DB_NAME(database_id) AS db,
+        name AS logical_name,
+        type,
+        physical_name,
+        (size * CAST(8192 AS BIGINT)) size_bytes 
+      FROM sys.master_files
+    values: [size_bytes]
+    key_labels: 
+      - db
+      - logical_name
+      - type
+      - physical_name
+
+  - metric_name: mssql_database_transactions_per_second
+    type: gauge
+    help: "Number of transactions started for the database per second. Transactions/sec does not count XTP-only transactions (transactions started by a natively compiled stored procedure.)"
+    query: |
+      SELECT rtrim(instance_name) as db, cntr_value
+      FROM sys.dm_os_performance_counters
+      WHERE counter_name = 'Transactions/sec' AND instance_name <> '_Total'
+    values: [cntr_value]
+    key_labels:
+      - db
+
+  - metric_name: mssql_database_cpu_usage_milliseconds
+    type: counter
+    help: "total number of miliseconds used by database"
+    query: |
+      SELECT
+        ISNULL(DB_Name(dm_execplanattr.DatabaseID), 'Resource[INTERNAL]') AS [db],
+        SUM (dm_execquerystats.total_worker_time) AS CPUTimeInMiliSeconds
+      FROM sys.dm_exec_query_stats dm_execquerystats
+      CROSS APPLY 
+      (SELECT 
+        CONVERT (INT, value) AS [DatabaseID]
+      FROM sys.dm_exec_plan_attributes(dm_execquerystats.plan_handle)
+      WHERE attribute = N'dbid'
+      ) dm_execplanattr
+      GROUP BY dm_execplanattr.DatabaseID
+    values: [CPUTimeInMiliSeconds]
+    key_labels:
+      - db
+
+  #** jobs parts
+  - metric_name: mssql_jobs_lastrun_timestamp
+    type: gauge
+    help: 'the status of the job: 0=disable 1=enable.'
+    values: [lastrun_timestamp]
+    query_ref: mssql_jobs
+    key_labels:
+      - jobname
+
+  - metric_name: mssql_jobs_enable
+    type: gauge
+    help: 'the activation state of the job: 0=disable 1=enable.'
+    values: [jobstatus]
+    query_ref: mssql_jobs
+    key_labels:
+      - jobname
+
+  - metric_name: mssql_jobs_status
+    type: gauge
+    help: 'the result status of the job: 0=failed 1=succeeded 2=retry 3=cancelled.'
+    values: [jobrunstatus]
+    query_ref: mssql_jobs
+    key_labels:
+      - jobname
 
 queries:
   # Populates `mssql_io_stall` and `mssql_io_stall_total`
   - query_name: mssql_io_stall
     query: |
       SELECT
-        cast(DB_Name(a.database_id) as varchar) AS [db],
+        replace(DB_Name(a.database_id), ' ', '') AS [db],
         sum(io_stall_read_ms) / 1000.0 AS [read],
         sum(io_stall_write_ms) / 1000.0 AS [write],
         sum(io_stall) / 1000.0 AS io_stall
@@ -204,4 +323,18 @@ queries:
         memory_utilization_percentage,
         page_fault_count
       FROM sys.dm_os_process_memory
-      
+
+  - query_name: mssql_jobs
+    query: |
+      SELECT
+        j.name as jobname,
+        datediff(second, '19700101', iif(js.last_run_date > 0, 
+              datetimefromparts(js.last_run_date/10000, js.last_run_date/100%100, js.last_run_date%100, 
+              js.last_run_time/10000, js.last_run_time/100%100, js.last_run_time%100, 0), 
+              '19700101')) as lastrun_timestamp,
+        j.enabled as jobstatus,
+        js.last_run_outcome as jobrunstatus
+      FROM msdb.dbo.sysjobs j
+      JOIN msdb.dbo.sysjobservers js on js.job_id = j.job_id
+
+    # where j.enabled = 1

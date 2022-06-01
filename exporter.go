@@ -2,66 +2,76 @@ package sql_exporter
 
 import (
 	"context"
-	"flag"
 	"fmt"
 	"sync"
 
-	"github.com/free/sql_exporter/config"
-	"github.com/golang/protobuf/proto"
+	"github.com/peekjf72/sql_exporter/config"
+
+	"google.golang.org/protobuf/proto"
+
+	"github.com/go-kit/log"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
+	kingpin "gopkg.in/alecthomas/kingpin.v2"
 )
 
-var dsnOverride = flag.String("config.data-source-name", "", "Data source name to override the value in the configuration file with.")
+var dsnOverride = kingpin.Flag("config.data-source-name", "Data source name to override the value in the configuration file with.").String()
 
 // Exporter is a prometheus.Gatherer that gathers SQL metrics from targets and merges them with the default registry.
 type Exporter interface {
 	prometheus.Gatherer
 
 	// WithContext returns a (single use) copy of the Exporter, which will use the provided context for Gather() calls.
-	WithContext(context.Context) Exporter
+	WithContext(context.Context, Target) Exporter
 	// Config returns the Exporter's underlying Config object.
 	Config() *config.Config
+	Logger() log.Logger
+	FindTarget(string) (Target, error)
 }
 
 type exporter struct {
 	config  *config.Config
 	targets []Target
 
-	ctx context.Context
+	cur_target Target
+	ctx        context.Context
+	logger     log.Logger
 }
 
 // NewExporter returns a new Exporter with the provided config.
-func NewExporter(configFile string) (Exporter, error) {
-	c, err := config.Load(configFile)
+func NewExporter(configFile string, logger log.Logger) (Exporter, error) {
+	c, err := config.Load(configFile, logger)
 	if err != nil {
 		return nil, err
 	}
 
 	// Override the DSN if requested (and in single target mode).
 	if *dsnOverride != "" {
-		if len(c.Jobs) > 0 {
-			return nil, fmt.Errorf("The config.data-source-name flag (value %q) only applies in single target mode", *dsnOverride)
+		if len(c.Targets) > 1 {
+			return nil, fmt.Errorf("the config.data-source-name flag (value %q) only applies in single target mode", *dsnOverride)
 		} else {
-			c.Target.DSN = config.Secret(*dsnOverride)
+			c.Targets[0].DSN = config.Secret(*dsnOverride)
 		}
 	}
 
 	var targets []Target
-	if c.Target != nil {
-		target, err := NewTarget("", "", string(c.Target.DSN), c.Target.Collectors(), nil, c.Globals)
+	var logContext []interface{}
+	if len(c.Targets) > 1 {
+		targets = make([]Target, 0, len(c.Targets)*3)
+	}
+	for _, t := range c.Targets {
+		if len(t.TargetsFiles) > 0 {
+			continue
+		}
+		target, err := NewTarget(logContext, t.Name, string(t.DSN),
+			t.Collectors(), nil, c.Globals, logger)
 		if err != nil {
 			return nil, err
 		}
-		targets = []Target{target}
-	} else {
-		targets = make([]Target, 0, len(c.Jobs)*3)
-		for _, jc := range c.Jobs {
-			job, err := NewJob(jc, c.Globals)
-			if err != nil {
-				return nil, err
-			}
-			targets = append(targets, job.Targets()...)
+		if len(c.Targets) > 1 {
+			targets = append(targets, target)
+		} else {
+			targets = []Target{target}
 		}
 	}
 
@@ -69,14 +79,17 @@ func NewExporter(configFile string) (Exporter, error) {
 		config:  c,
 		targets: targets,
 		ctx:     context.Background(),
+		logger:  logger,
 	}, nil
 }
 
-func (e *exporter) WithContext(ctx context.Context) Exporter {
+func (e *exporter) WithContext(ctx context.Context, t Target) Exporter {
 	return &exporter{
-		config:  e.config,
-		targets: e.targets,
-		ctx:     ctx,
+		config:     e.config,
+		targets:    e.targets,
+		cur_target: t,
+		ctx:        ctx,
+		logger:     e.logger,
 	}
 }
 
@@ -88,13 +101,19 @@ func (e *exporter) Gather() ([]*dto.MetricFamily, error) {
 	)
 
 	var wg sync.WaitGroup
-	wg.Add(len(e.targets))
-	for _, t := range e.targets {
-		go func(target Target) {
-			defer wg.Done()
-			target.Collect(e.ctx, metricChan)
-		}(t)
-	}
+	// wg.Add(len(e.targets))
+	// for _, t := range e.targets {
+	// 	go func(target Target) {
+	// 		defer wg.Done()
+	// 		target.Collect(e.ctx, metricChan)
+	// 	}(t)
+	// }
+	// add only cur target
+	wg.Add(1)
+	go func(target Target) {
+		defer wg.Done()
+		target.Collect(e.ctx, metricChan)
+	}(e.cur_target)
 
 	// Wait for all collectors to complete, then close the channel.
 	go func() {
@@ -147,4 +166,25 @@ func (e *exporter) Gather() ([]*dto.MetricFamily, error) {
 // Config implements Exporter.
 func (e *exporter) Config() *config.Config {
 	return e.config
+}
+
+// Logger implements Exporter.
+func (e *exporter) Logger() log.Logger {
+	return e.logger
+}
+
+// Logger implements Exporter.
+func (e *exporter) FindTarget(tname string) (Target, error) {
+	var t_found Target
+	found := false
+	for _, t := range e.targets {
+		if tname == t.Name() {
+			t_found = t
+			found = true
+		}
+	}
+	if !found {
+		return t_found, fmt.Errorf("target '%s' not found", tname)
+	}
+	return t_found, nil
 }

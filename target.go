@@ -4,23 +4,23 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
-	"fmt"
 	"sort"
 	"sync"
 	"time"
 
-	"github.com/free/sql_exporter/config"
-	"github.com/free/sql_exporter/errors"
-	"github.com/golang/protobuf/proto"
+	"github.com/peekjef72/sql_exporter/config"
+
+	"github.com/go-kit/log"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
+	"google.golang.org/protobuf/proto"
 )
 
 const (
 	// Capacity for the channel to collect metrics.
 	capMetricChan = 1000
 
-	upMetricName       = "up"
+	upMetricName       = "mssql_up"
 	upMetricHelp       = "1 if the target is reachable, or 0 if the scrape failed"
 	scrapeDurationName = "scrape_duration_seconds"
 	scrapeDurationHelp = "How long it took to scrape the target in seconds"
@@ -31,6 +31,7 @@ const (
 type Target interface {
 	// Collect is the equivalent of prometheus.Collector.Collect(), but takes a context to run in.
 	Collect(ctx context.Context, ch chan<- Metric)
+	Name() string
 }
 
 // target implements Target. It wraps a sql.DB, which is initially nil but never changes once instantianted.
@@ -42,19 +43,24 @@ type target struct {
 	globalConfig       *config.GlobalConfig
 	upDesc             MetricDesc
 	scrapeDurationDesc MetricDesc
-	logContext         string
+	logContext         []interface{}
 
-	conn *sql.DB
+	conn   *sql.DB
+	logger log.Logger
 }
 
 // NewTarget returns a new Target with the given instance name, data source name, collectors and constant labels.
 // An empty target name means the exporter is running in single target mode: no synthetic metrics will be exported.
 func NewTarget(
-	logContext, name, dsn string, ccs []*config.CollectorConfig, constLabels prometheus.Labels, gc *config.GlobalConfig) (
-	Target, errors.WithContext) {
+	logContext []interface{},
+	name, dsn string,
+	ccs []*config.CollectorConfig,
+	constLabels prometheus.Labels,
+	gc *config.GlobalConfig,
+	logger log.Logger) (Target, error) {
 
 	if name != "" {
-		logContext = fmt.Sprintf("%s, target=%q", logContext, name)
+		logContext = append(logContext, "target", name)
 	}
 
 	constLabelPairs := make([]*dto.LabelPair, 0, len(constLabels))
@@ -68,7 +74,7 @@ func NewTarget(
 
 	collectors := make([]Collector, 0, len(ccs))
 	for _, cc := range ccs {
-		c, err := NewCollector(logContext, cc, constLabelPairs)
+		c, err := NewCollector(logContext, logger, cc, constLabelPairs)
 		if err != nil {
 			return nil, err
 		}
@@ -87,6 +93,7 @@ func NewTarget(
 		upDesc:             upDesc,
 		scrapeDurationDesc: scrapeDurationDesc,
 		logContext:         logContext,
+		logger:             logger,
 	}
 	return &t, nil
 }
@@ -100,7 +107,7 @@ func (t *target) Collect(ctx context.Context, ch chan<- Metric) {
 
 	err := t.ping(ctx)
 	if err != nil {
-		ch <- NewInvalidMetric(errors.Wrap(t.logContext, err))
+		ch <- NewInvalidMetric(t.logContext, err)
 		targetUp = false
 	}
 	if t.name != "" {
@@ -129,15 +136,15 @@ func (t *target) Collect(ctx context.Context, ch chan<- Metric) {
 	}
 }
 
-func (t *target) ping(ctx context.Context) errors.WithContext {
+func (t *target) ping(ctx context.Context) error {
 	// Create the DB handle, if necessary. It won't usually open an actual connection, so we'll need to ping afterwards.
 	// We cannot do this only once at creation time because the sql.Open() documentation says it "may" open an actual
 	// connection, so it "may" actually fail to open a handle to a DB that's initially down.
 	if t.conn == nil {
-		conn, err := OpenConnection(ctx, t.logContext, t.dsn, t.globalConfig.MaxConns, t.globalConfig.MaxIdleConns)
+		conn, err := OpenConnection(ctx, t.logContext, t.logger, t.dsn, t.globalConfig.MaxConns, t.globalConfig.MaxIdleConns)
 		if err != nil {
 			if err != ctx.Err() {
-				return errors.Wrap(t.logContext, err)
+				return config.ErrorWrap(t.logContext, err)
 			}
 			// if err == ctx.Err() fall through
 		} else {
@@ -156,14 +163,19 @@ func (t *target) ping(ctx context.Context) errors.WithContext {
 			}
 		}
 		if err != nil {
-			return errors.Wrap(t.logContext, err)
+			return config.ErrorWrap(t.logContext, err)
 		}
 	}
 
 	if ctx.Err() != nil {
-		return errors.Wrap(t.logContext, ctx.Err())
+		return config.ErrorWrap(t.logContext, ctx.Err())
 	}
 	return nil
+}
+
+// to obtain target name from interface
+func (t *target) Name() string {
+	return t.name
 }
 
 // boolToFloat64 converts a boolean flag to a float64 value (0.0 or 1.0).

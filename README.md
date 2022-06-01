@@ -1,11 +1,11 @@
-# Prometheus SQL Exporter [![Build Status](https://travis-ci.org/free/sql_exporter.svg)](https://travis-ci.org/free/sql_exporter) [![Go Report Card](https://goreportcard.com/badge/github.com/free/sql_exporter)](https://goreportcard.com/report/github.com/free/sql_exporter) [![GoDoc](https://godoc.org/github.com/free/sql_exporter?status.svg)](https://godoc.org/github.com/free/sql_exporter) [![Docker Pulls](https://img.shields.io/docker/pulls/githubfree/sql_exporter.svg?maxAge=604800)](https://hub.docker.com/r/githubfree/sql_exporter)
+# Prometheus MSSQL Exporter [![Build Status](https://travis-ci.org/free/sql_exporter.svg)](https://travis-ci.org/free/sql_exporter) [![Go Report Card](https://goreportcard.com/badge/github.com/free/sql_exporter)](https://goreportcard.com/report/github.com/free/sql_exporter) [![GoDoc](https://godoc.org/github.com/free/sql_exporter?status.svg)](https://godoc.org/github.com/free/sql_exporter) [![Docker Pulls](https://img.shields.io/docker/pulls/githubfree/sql_exporter.svg?maxAge=604800)](https://hub.docker.com/r/githubfree/sql_exporter)
 
-Database agnostic SQL exporter for [Prometheus](https://prometheus.io).
+Database MSSQL exporter for [Prometheus](https://prometheus.io).
 
 ## Overview
 
 SQL Exporter is a configuration driven exporter that exposes metrics gathered from DBMSs, for use by the Prometheus
-monitoring system. Out of the box, it provides support for MySQL, PostgreSQL, Microsoft SQL Server and Clickhouse, but
+monitoring system. Out of the box, it provides support for <strike>MySQL, PostgreSQL,</strike> Microsoft SQL Server <strike>and Clickhouse</strike>, but
 any DBMS for which a Go driver is available may be monitored after rebuilding the binary with the DBMS driver included.
 
 The collected metrics and the queries that produce them are entirely configuration defined. SQL queries are grouped into

@@ -12,8 +12,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/free/sql_exporter"
-	log "github.com/golang/glog"
+	"github.com/peekjef72/sql_exporter"
+
+	"github.com/go-kit/log/level"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/expfmt"
 )
@@ -31,11 +32,24 @@ func ExporterHandlerFor(exporter sql_exporter.Exporter) http.Handler {
 		ctx, cancel := contextFor(req, exporter)
 		defer cancel()
 
+		params := req.URL.Query()
+		tname := params.Get("target")
+		if tname == "" {
+			http.Error(w, "Target parameter is missing", 400)
+			return
+		}
+
+		t, err := exporter.FindTarget(tname)
+		if err != nil {
+			http.Error(w, err.Error(), 404)
+			return
+		}
+
 		// Go through prometheus.Gatherers to sanitize and sort metrics.
-		gatherer := prometheus.Gatherers{exporter.WithContext(ctx)}
+		gatherer := prometheus.Gatherers{exporter.WithContext(ctx, t)}
 		mfs, err := gatherer.Gather()
 		if err != nil {
-			log.Infof("Error gathering metrics: %s", err)
+			level.Error(exporter.Logger()).Log("msg", fmt.Sprintf("Error gathering metrics: %s", err))
 			if len(mfs) == 0 {
 				http.Error(w, "No metrics gathered, "+err.Error(), http.StatusInternalServerError)
 				return
@@ -51,7 +65,7 @@ func ExporterHandlerFor(exporter sql_exporter.Exporter) http.Handler {
 		for _, mf := range mfs {
 			if err := enc.Encode(mf); err != nil {
 				errs = append(errs, err)
-				log.Infof("Error encoding metric family %q: %s", mf.GetName(), err)
+				level.Info(exporter.Logger()).Log("msg", fmt.Sprintf("Error encoding metric family %q: %s", mf.GetName(), err))
 			}
 		}
 		if closer, ok := writer.(io.Closer); ok {
@@ -78,15 +92,15 @@ func contextFor(req *http.Request, exporter sql_exporter.Exporter) (context.Cont
 	if v := req.Header.Get("X-Prometheus-Scrape-Timeout-Seconds"); v != "" {
 		timeoutSeconds, err := strconv.ParseFloat(v, 64)
 		if err != nil {
-			log.Errorf("Failed to parse timeout (`%s`) from Prometheus header: %s", v, err)
+			level.Error(exporter.Logger()).Log("msg", fmt.Sprintf("Failed to parse timeout (`%s`) from Prometheus header: %s", v, err))
 		} else {
 			timeout = time.Duration(timeoutSeconds * float64(time.Second))
 
 			// Subtract the timeout offset, unless the result would be negative or zero.
 			timeoutOffset := time.Duration(exporter.Config().Globals.TimeoutOffset)
 			if timeoutOffset > timeout {
-				log.Errorf("global.scrape_timeout_offset (`%s`) is greater than Prometheus' scraping timeout (`%s`), ignoring",
-					timeoutOffset, timeout)
+				level.Error(exporter.Logger()).Log("msg", fmt.Sprintf("global.scrape_timeout_offset (`%s`) is greater than Prometheus' scraping timeout (`%s`), ignoring",
+					timeoutOffset, timeout))
 			} else {
 				timeout -= timeoutOffset
 			}

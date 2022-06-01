@@ -6,11 +6,9 @@ import (
 	"fmt"
 	"strings"
 
-	_ "github.com/ClickHouse/clickhouse-go" // register the ClickHouse driver
-	_ "github.com/denisenkom/go-mssqldb"    // register the MS-SQL driver
-	_ "github.com/go-sql-driver/mysql"      // register the MySQL driver
-	log "github.com/golang/glog"
-	_ "github.com/lib/pq" // register the PostgreSQL driver
+	_ "github.com/denisenkom/go-mssqldb" // register the MS-SQL driver
+	"github.com/go-kit/log"
+	"github.com/go-kit/log/level"
 )
 
 // OpenConnection extracts the driver name from the DSN (expected as the URI scheme), adjusts it where necessary (e.g.
@@ -43,11 +41,16 @@ import (
 // Using the https://github.com/kshvakov/clickhouse driver, DSN format (passed to the driver with the`clickhouse://`
 // prefix replaced with `tcp://`):
 //   clickhouse://host:port?username=username&password=password&database=dbname&param=value
-func OpenConnection(ctx context.Context, logContext, dsn string, maxConns, maxIdleConns int) (*sql.DB, error) {
+func OpenConnection(
+	ctx context.Context,
+	logContext []interface{},
+	logger log.Logger,
+	dsn string,
+	maxConns, maxIdleConns int) (*sql.DB, error) {
 	// Extract driver name from DSN.
 	idx := strings.Index(dsn, "://")
 	if idx == -1 {
-		return nil, fmt.Errorf("missing driver in data source name. Expected format `<driver>://<dsn>`.")
+		return nil, fmt.Errorf("missing driver in data source name. Expected format `<driver>://<dsn>`")
 	}
 	driver := dsn[:idx]
 
@@ -81,12 +84,9 @@ func OpenConnection(ctx context.Context, logContext, dsn string, maxConns, maxId
 	conn.SetMaxIdleConns(maxIdleConns)
 	conn.SetMaxOpenConns(maxConns)
 
-	if log.V(1) {
-		if len(logContext) > 0 {
-			logContext = fmt.Sprintf("[%s] ", logContext)
-		}
-		log.Infof("%sDatabase handle successfully opened with driver %s.", logContext, driver)
-	}
+	logContext = append(logContext, "msg", fmt.Sprintf("Database handle successfully opened with driver %s.", driver))
+	level.Debug(logger).Log(logContext...)
+
 	return conn, nil
 }
 

@@ -5,7 +5,7 @@ import (
 	"html/template"
 	"net/http"
 
-	"github.com/free/sql_exporter"
+	"github.com/peekjef72/sql_exporter"
 )
 
 const (
@@ -14,7 +14,7 @@ const (
     {{ define "page" -}}
       <html>
       <head>
-        <title>Prometheus SQL Exporter</title>
+        <title>Prometheus MSSQL Exporter</title>
         <style type="text/css">
           body { margin: 0; font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; font-size: 14px; line-height: 1.42857143; color: #333; background-color: #fff; }
           .navbar { display: flex; background-color: #222; margin: 0; border-width: 0 0 1px; border-style: solid; border-color: #080808; }
@@ -32,7 +32,7 @@ const (
       </head>
       <body>
         <div class="navbar">
-          <div class="navbar-header"><a href="/">Prometheus SQL Exporter</a></div>
+          <div class="navbar-header"><a href="/">Prometheus MSSQL Exporter</a></div>
           <div><a href="{{ .MetricsPath }}">Metrics</a></div>
           <div><a href="/config">Configuration</a></div>
           <div><a href="/debug/pprof">Profiling</a></div>
@@ -44,7 +44,7 @@ const (
     {{- end }}
 
     {{ define "content.home" -}}
-      <p>This is a <a href="{{ .DocsUrl }}">Prometheus SQL Exporter</a> instance.
+      <p>This is a <a href="{{ .DocsUrl }}">Prometheus MSSQL Exporter</a> instance.
         You are probably looking for its <a href="{{ .MetricsPath }}">metrics</a> handler.</p>
     {{- end }}
 
