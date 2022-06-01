@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 
-	"github.com/peekjf72/sql_exporter/config"
+	"github.com/peekjef72/sql_exporter/config"
 	// "sql_exporter/errors"
 
 	"github.com/go-kit/log"

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/peekjf72/sql_exporter/config"
+	"github.com/peekjef72/sql_exporter/config"
 	// "sql_exporter/errors"
 
 	"github.com/prometheus/client_golang/prometheus"

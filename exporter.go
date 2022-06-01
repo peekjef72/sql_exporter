@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/peekjf72/sql_exporter/config"
+	"github.com/peekjef72/sql_exporter/config"
 
 	"google.golang.org/protobuf/proto"
 
