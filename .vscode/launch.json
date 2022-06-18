@@ -14,8 +14,9 @@
                 // "-V",
                 // "-h",
                 "--log.level", "debug",
-                "--config.file", "../../sql_exporter.yml",
-                "--web.listen-address", ":9400",
+                "--config.file", "/etc/sql_exporter/sql_exporter-0.6.0.yml",
+                "--web.listen-address", ":9401",
+                "--dry-run", "--target", "LYNC"
                 // "--config.data-source-name", "prout",
             ]
         }

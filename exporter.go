@@ -27,6 +27,7 @@ type Exporter interface {
 	Config() *config.Config
 	Logger() log.Logger
 	FindTarget(string) (Target, error)
+	GetFirstTarget() (Target, error)
 }
 
 type exporter struct {
@@ -173,7 +174,7 @@ func (e *exporter) Logger() log.Logger {
 	return e.logger
 }
 
-// Logger implements Exporter.
+// FindTarget implements Exporter.
 func (e *exporter) FindTarget(tname string) (Target, error) {
 	var t_found Target
 	found := false
@@ -185,6 +186,17 @@ func (e *exporter) FindTarget(tname string) (Target, error) {
 	}
 	if !found {
 		return t_found, fmt.Errorf("target '%s' not found", tname)
+	}
+	return t_found, nil
+}
+
+// GetFirstTarget implements Exporter.
+func (e *exporter) GetFirstTarget() (Target, error) {
+	var t_found Target
+	if len(e.targets) == 0 {
+		return t_found, fmt.Errorf("no target found")
+	} else {
+		t_found = e.targets[0]
 	}
 	return t_found, nil
 }
