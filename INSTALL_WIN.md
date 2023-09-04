@@ -1,1 +1,0 @@
-go build -ldflags '-X github.com/prometheus/common/version.Version=0.8.1 -X github.com/prometheus/common/version.Revision=42e4069950c7fc15fa53c51e0479c84700c28515 -X github.com/prometheus/common/version.Branch=multidb_devs -X github.com/prometheus/common/version.BuildDate=20230904-08:43:00 -X github.com/prometheus/common/version.BuildUser=peekjef72@pc_collab'  -tags mssql
