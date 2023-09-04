@@ -1,4 +1,4 @@
-package sql_exporter
+package main
 
 import (
 	"context"
@@ -7,8 +7,6 @@ import (
 	"sort"
 	"sync"
 	"time"
-
-	"github.com/peekjef72/sql_exporter/config"
 
 	"github.com/go-kit/log"
 	"github.com/prometheus/client_golang/prometheus"
@@ -20,8 +18,7 @@ const (
 	// Capacity for the channel to collect metrics.
 	capMetricChan = 1000
 
-	upMetricName       = "mssql_up"
-	upMetricHelp       = "1 if the target is reachable, or 0 if the scrape failed"
+	upMetricHelp       = "if the target is reachable 1, else 0 if the scrape failed"
 	scrapeDurationName = "scrape_duration_seconds"
 	scrapeDurationHelp = "How long it took to scrape the target in seconds"
 )
@@ -40,13 +37,14 @@ type target struct {
 	dsn                string
 	collectors         []Collector
 	constLabels        prometheus.Labels
-	globalConfig       *config.GlobalConfig
+	globalConfig       *GlobalConfig
 	upDesc             MetricDesc
 	scrapeDurationDesc MetricDesc
 	logContext         []interface{}
 
-	conn   *sql.DB
-	logger log.Logger
+	conn          *sql.DB
+	logger        log.Logger
+	symbols_table map[string]interface{}
 }
 
 // NewTarget returns a new Target with the given instance name, data source name, collectors and constant labels.
@@ -54,9 +52,9 @@ type target struct {
 func NewTarget(
 	logContext []interface{},
 	name, dsn string,
-	ccs []*config.CollectorConfig,
+	ccs []*CollectorConfig,
 	constLabels prometheus.Labels,
-	gc *config.GlobalConfig,
+	gc *GlobalConfig,
 	logger log.Logger) (Target, error) {
 
 	if name != "" {
@@ -80,10 +78,12 @@ func NewTarget(
 		}
 		collectors = append(collectors, c)
 	}
-
+	upMetricName := gc.NameSpace + "_up"
 	upDesc := NewAutomaticMetricDesc(logContext, upMetricName, upMetricHelp, prometheus.GaugeValue, constLabelPairs)
 	scrapeDurationDesc :=
 		NewAutomaticMetricDesc(logContext, scrapeDurationName, scrapeDurationHelp, prometheus.GaugeValue, constLabelPairs)
+	symbols_table := make(map[string]interface{}, 2)
+
 	t := target{
 		name:               name,
 		dsn:                dsn,
@@ -94,6 +94,7 @@ func NewTarget(
 		scrapeDurationDesc: scrapeDurationDesc,
 		logContext:         logContext,
 		logger:             logger,
+		symbols_table:      symbols_table,
 	}
 	return &t, nil
 }
@@ -123,7 +124,7 @@ func (t *target) Collect(ctx context.Context, ch chan<- Metric) {
 			// If using a single DB connection, collectors will likely run sequentially anyway. But we might have more.
 			go func(collector Collector) {
 				defer wg.Done()
-				collector.Collect(ctx, t.conn, ch)
+				collector.Collect(ctx, t.conn, t.symbols_table, ch)
 			}(c)
 		}
 	}
@@ -141,10 +142,11 @@ func (t *target) ping(ctx context.Context) error {
 	// We cannot do this only once at creation time because the sql.Open() documentation says it "may" open an actual
 	// connection, so it "may" actually fail to open a handle to a DB that's initially down.
 	if t.conn == nil {
-		conn, err := OpenConnection(ctx, t.logContext, t.logger, t.dsn, t.globalConfig.MaxConns, t.globalConfig.MaxIdleConns)
+		conn, err := OpenConnection(ctx, t.logContext, t.logger, t.dsn,
+			t.globalConfig.MaxConns, t.globalConfig.MaxIdleConns, t.symbols_table)
 		if err != nil {
 			if err != ctx.Err() {
-				return config.ErrorWrap(t.logContext, err)
+				return ErrorWrap(t.logContext, err)
 			}
 			// if err == ctx.Err() fall through
 		} else {
@@ -163,12 +165,12 @@ func (t *target) ping(ctx context.Context) error {
 			}
 		}
 		if err != nil {
-			return config.ErrorWrap(t.logContext, err)
+			return ErrorWrap(t.logContext, err)
 		}
 	}
 
 	if ctx.Err() != nil {
-		return config.ErrorWrap(t.logContext, ctx.Err())
+		return ErrorWrap(t.logContext, ctx.Err())
 	}
 	return nil
 }

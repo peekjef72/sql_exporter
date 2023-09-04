@@ -11,7 +11,7 @@ collector_name: mssql_standard
 #min_interval: 0s
 
 metrics:
-  - metric_name: mssql_version
+  - metric_name: version
     help: 'version, edition, instance, chartset and sortorder server properties as labels: value 1'
     type: gauge
     values: [value]
@@ -31,26 +31,26 @@ metrics:
       @@MAX_CONNECTIONS as maxconnection,
       1 as value
 
-  - metric_name: mssql_cpu_count
+  - metric_name: cpu_count
     help: "Specifies the number of logical CPUs on the system"
     type: gauge
     values: [cpu_count]
-    query_ref: mssql_system
+    query_ref: system
 
-  - metric_name: mssql_start_timestamp
+  - metric_name: start_timestamp
     help: "server start timestamp (unix epoch) in second"
     type: gauge
     values: [unix_time]
-    query_ref: mssql_system
+    query_ref: system
 
-  - metric_name: mssql_process_seconds
+  - metric_name: process_seconds
     help: "Total time in seconds spent by all SQL Server threads in kernel and user mode"
     type: gauge
     values: [proc_kernel, proc_user]
     value_label: 'type'
-    query_ref: mssql_system
+    query_ref: system
 
-  - metric_name: mssql_connections
+  - metric_name: connections
     type: gauge
     help: 'Number of active connections.'
     key_labels:
@@ -68,7 +68,7 @@ metrics:
   #
   # Collected from sys.dm_os_performance_counters
   #
-  - metric_name: mssql_deadlocks
+  - metric_name: deadlocks
     type: counter
     help: 'Number of lock requests that resulted in a deadlock.'
     values: [cntr_value]
@@ -77,7 +77,7 @@ metrics:
       FROM sys.dm_os_performance_counters WITH (NOLOCK)
       WHERE counter_name = 'Number of Deadlocks/sec' AND instance_name = '_Total'
 
-  - metric_name: mssql_user_errors
+  - metric_name: user_errors
     type: counter
     help: 'Number of user errors.'
     values: [cntr_value]
@@ -86,7 +86,7 @@ metrics:
       FROM sys.dm_os_performance_counters WITH (NOLOCK)
       WHERE counter_name = 'Errors/sec' AND instance_name = 'User Errors'
 
-  - metric_name: mssql_kill_connection_errors
+  - metric_name: kill_connection_errors
     type: counter
     help: 'Number of severe errors that caused SQL Server to kill the connection.'
     values: [cntr_value]
@@ -95,7 +95,7 @@ metrics:
       FROM sys.dm_os_performance_counters WITH (NOLOCK)
       WHERE counter_name = 'Errors/sec' AND instance_name = 'Kill Connection Errors'
 
-  - metric_name: mssql_page_life_expectancy_seconds
+  - metric_name: page_life_expectancy_seconds
     type: gauge
     help: 'The minimum number of seconds a page will stay in the buffer pool on this node without references.'
     values: [cntr_value]
@@ -104,7 +104,7 @@ metrics:
       FROM sys.dm_os_performance_counters WITH (NOLOCK)
       WHERE counter_name = 'Page life expectancy'
 
-  - metric_name: mssql_batch_requests
+  - metric_name: batch_requests
     type: counter
     help: 'Number of command batches received.'
     values: [cntr_value]
@@ -113,7 +113,7 @@ metrics:
       FROM sys.dm_os_performance_counters WITH (NOLOCK)
       WHERE counter_name = 'Batch Requests/sec'
 
-  - metric_name: mssql_log_growths
+  - metric_name: log_growths
     type: counter
     help: 'Number of times the transaction log has been expanded, per database.'
     key_labels:
@@ -124,7 +124,7 @@ metrics:
       FROM sys.dm_os_performance_counters WITH (NOLOCK)
       WHERE counter_name = 'Log Growths' AND instance_name <> '_Total'
 
-  - metric_name: mssql_buffer_cache_hit_ratio
+  - metric_name: buffer_cache_hit_ratio
     type: gauge
     help: 'Ratio of requests that hit the buffer cache (type hit), total request (type tot_req)'
     values: [hit, tot_req]
@@ -136,7 +136,7 @@ metrics:
       WHERE a.counter_name = 'Buffer cache hit ratio base'
       and b.counter_name = 'Buffer cache hit ratio'
 
-  - metric_name: mssql_checkpoint_pages_sec
+  - metric_name: checkpoint_pages_sec
     type: gauge
     help: 'Checkpoint Pages Per Second'
     values: [cntr_value]
@@ -148,7 +148,7 @@ metrics:
   #
   # Collected from sys.dm_io_virtual_file_stats
   #
-  - metric_name: mssql_io_stall_seconds
+  - metric_name: io_stall_seconds
     type: counter
     help: 'Stall time in seconds per database and I/O operation.'
     key_labels:
@@ -157,48 +157,48 @@ metrics:
     values:
       - read
       - write
-    query_ref: mssql_io_stall
+    query_ref: io_stall
 
-  - metric_name: mssql_io_stall_total_seconds
+  - metric_name: io_stall_total_seconds
     type: counter
     help: 'Total stall time in seconds per database.'
     key_labels:
       - db
     values:
       - io_stall
-    query_ref: mssql_io_stall
+    query_ref: io_stall
 
   #
   # Collected from sys.dm_os_process_memory
   #
-  - metric_name: mssql_resident_memory_bytes
+  - metric_name: resident_memory_bytes
     type: gauge
     help: 'SQL Server resident memory size (AKA working set).'
     values: [resident_memory_bytes]
-    query_ref: mssql_process_memory
+    query_ref: process_memory
 
-  - metric_name: mssql_virtual_memory_bytes
+  - metric_name: virtual_memory_bytes
     type: gauge
     help: 'SQL Server committed virtual memory size.'
     values: [virtual_memory_bytes]
-    query_ref: mssql_process_memory
+    query_ref: process_memory
 
-  - metric_name: mssql_memory_utilization_percentage
+  - metric_name: memory_utilization_percentage
     type: gauge
     help: 'The percentage of committed memory that is in the working set.'
     values: [memory_utilization_percentage]
-    query_ref: mssql_process_memory
+    query_ref: process_memory
 
-  - metric_name: mssql_page_fault_count
+  - metric_name: page_fault_count
     type: counter
     help: 'The number of page faults that were incurred by the SQL Server process.'
     values: [page_fault_count]
-    query_ref: mssql_process_memory
+    query_ref: process_memory
 
   #
   # Collected from sys.dm_os_sys_memory
   #
-  - metric_name: mssql_os_memory_bytes
+  - metric_name: os_memory_bytes
     type: gauge
     help: 'OS physical memory, used and available in bytes.'
     value_label: 'state'
@@ -210,7 +210,7 @@ metrics:
         total_physical_memory_kb * 1024 AS total
       FROM sys.dm_os_sys_memory
 
-  - metric_name: mssql_os_page_file_bytes
+  - metric_name: os_page_file_bytes
     type: gauge
     help: 'OS page file, used and available in bytes.'
     value_label: 'state'
@@ -222,7 +222,7 @@ metrics:
         total_page_file_kb * 1024 AS total
       FROM sys.dm_os_sys_memory
   
-  - metric_name: mssql_database_state
+  - metric_name: database_state
     type: gauge
     help: "Database state: 0=ONLINE 1=RESTORING 2=RECOVERING 3=RECOVERY_PENDING 4=SUSPECT 5=EMERGENCY 6=OFFLINE 7=COPYING 10=OFFLINE_SECONDARY"
     query: |
@@ -231,7 +231,7 @@ metrics:
     key_labels:
       - db
 
-  - metric_name: mssql_database_filesize_bytes
+  - metric_name: database_filesize_bytes
     type: gauge
     help: Physical sizes of files used by database in bytes, their names and types (0=rows, 1=log, 2=filestream,3=n/a 4=fulltext(before v2008 of MSSQL))
     query: |
@@ -240,7 +240,7 @@ metrics:
         type,
         physical_name,
         (size * CAST(8192 AS BIGINT)) size_bytes 
-      FROM sys.master_files
+      FROM master.sys.master_files
     values: [size_bytes]
     key_labels: 
       - db
@@ -248,7 +248,7 @@ metrics:
       - type
       - physical_name
 
-  - metric_name: mssql_database_transactions_per_second
+  - metric_name: database_transactions_per_second
     type: gauge
     help: "Number of transactions started for the database per second. Transactions/sec does not count XTP-only transactions (transactions started by a natively compiled stored procedure.)"
     query: |
@@ -259,14 +259,15 @@ metrics:
     key_labels:
       - db
 
-  - metric_name: mssql_database_cpu_percent
+  - metric_name: database_cpu_percent
     type: gauge
     help: "cpu percent used by each database on overall sql cpu usage."
     query: |
       WITH DB_CPU_Stats
       AS
       (
-          SELECT DatabaseID, isnull(DB_Name(DatabaseID),case DatabaseID when 32767 then 'Internal ResourceDB' else CONVERT(varchar(255),DatabaseID)end) AS [DatabaseName], 
+          SELECT DatabaseID,
+            isnull(DB_Name(DatabaseID),case DatabaseID when 32767 then 'Internal ResourceDB' else CONVERT(varchar(255),DatabaseID)end) AS [DatabaseName], 
             SUM(total_worker_time) AS [CPU_Time_Ms],
             SUM(total_logical_reads)  AS [Logical_Reads],
             SUM(total_logical_writes)  AS [Logical_Writes],
@@ -292,33 +293,41 @@ metrics:
       - db
 
   #** jobs parts
-  - metric_name: mssql_jobs_lastrun_timestamp
+  - metric_name: jobs_lastrun_timestamp
     type: gauge
     help: 'the status of the job: 0=disable 1=enable.'
     values: [lastrun_timestamp]
-    query_ref: mssql_jobs
+    query_ref: jobs
     key_labels:
       - jobname
 
-  - metric_name: mssql_jobs_enable
+  - metric_name: jobs_enable
     type: gauge
     help: 'the activation state of the job: 0=disable 1=enable.'
     values: [jobstatus]
-    query_ref: mssql_jobs
+    query_ref: jobs
     key_labels:
       - jobname
 
-  - metric_name: mssql_jobs_status
+  - metric_name: jobs_status
     type: gauge
-    help: 'the result status of the job: 0=failed 1=succeeded 2=retry 3=cancelled.'
+    help: 'the result status of the job: 0=failed 1=succeeded 2=retry 3=cancelled 4=In progress 5=Unknown.'
     values: [jobrunstatus]
-    query_ref: mssql_jobs
+    query_ref: jobs
     key_labels:
       - jobname
+
+  # - metric_name: jobs_schedule
+  #   type: gauge
+  #   help: 'the schedule state of the job: 0=not scheduled 1=scheduled.'
+  #   values: [jobscheduled]
+  #   query_ref: jobs
+  #   key_labels:
+  #     - jobname
 
 queries:
-  # Populates `mssql_io_stall` and `mssql_io_stall_total`
-  - query_name: mssql_io_stall
+  # Populates `io_stall` and `io_stall_total`
+  - query_name: io_stall
     query: |
       SELECT
         replace(DB_Name(a.database_id), ' ', '') AS [db],
@@ -330,9 +339,9 @@ queries:
       INNER JOIN sys.master_files b ON a.database_id = b.database_id AND a.file_id = b.file_id
       GROUP BY a.database_id
 
-  # Populates `mssql_resident_memory_bytes`, `mssql_virtual_memory_bytes`, `mssql_memory_utilization_percentage` and
-  # `mssql_page_fault_count`.
-  - query_name: mssql_process_memory
+  # Populates `resident_memory_bytes`, `virtual_memory_bytes`, `memory_utilization_percentage` and
+  # `page_fault_count`.
+  - query_name: process_memory
     query: |
       SELECT
         physical_memory_in_use_kb * 1024 AS resident_memory_bytes,
@@ -342,7 +351,7 @@ queries:
       FROM sys.dm_os_process_memory
 
   # populates start_time_ts, proc_kern_seconds, proc_user_seconds, cpu_count
-  - query_name: mssql_system
+  - query_name: system
     query: |
       SELECT DATEDIFF(second, '19700101', sqlserver_start_time) as unix_time,
         process_kernel_time_ms as proc_kernel,
@@ -350,7 +359,7 @@ queries:
         cpu_count
       FROM sys.dm_os_sys_info
 
-  - query_name: mssql_jobs
+  - query_name: jobs
     query: |
       SELECT
         j.name as jobname,
@@ -362,5 +371,21 @@ queries:
         js.last_run_outcome as jobrunstatus
       FROM msdb.dbo.sysjobs j
       JOIN msdb.dbo.sysjobservers js on js.job_id = j.job_id
-
     # where j.enabled = 1
+
+    # try to add schedule part for job...
+    # query: |
+    #   SELECT
+    #     j.name as jobname,
+    #     datediff(second, '19700101', iif(js.last_run_date > 0, 
+    #           datetimefromparts(js.last_run_date/10000, js.last_run_date/100%100, js.last_run_date%100, 
+    #           js.last_run_time/10000, js.last_run_time/100%100, js.last_run_time%100, 0), 
+    #           '19700101')) as lastrun_timestamp,
+    #     j.enabled as jobstatus,
+    #     js.last_run_outcome as jobrunstatus,
+    #     sc.enabled as jobscheduled
+    #   FROM msdb.dbo.sysjobs j
+    #   JOIN msdb.dbo.sysjobservers js on js.job_id = j.job_id
+    #   JOIN msdb.dbo.sysjobschedules jsc on jsc.job_id = j.job_id
+    #   LEFT JOIN msdb.dbo.sysschedules sc on sc.schedule_id = jsc.schedule_id
+

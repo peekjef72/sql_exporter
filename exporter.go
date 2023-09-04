@@ -1,18 +1,16 @@
-package sql_exporter
+package main
 
 import (
 	"context"
 	"fmt"
 	"sync"
 
-	"github.com/peekjef72/sql_exporter/config"
-
 	"google.golang.org/protobuf/proto"
 
+	kingpin "github.com/alecthomas/kingpin/v2"
 	"github.com/go-kit/log"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
-	kingpin "gopkg.in/alecthomas/kingpin.v2"
 )
 
 var dsnOverride = kingpin.Flag("config.data-source-name", "Data source name to override the value in the configuration file with.").String()
@@ -24,14 +22,14 @@ type Exporter interface {
 	// WithContext returns a (single use) copy of the Exporter, which will use the provided context for Gather() calls.
 	WithContext(context.Context, Target) Exporter
 	// Config returns the Exporter's underlying Config object.
-	Config() *config.Config
+	Config() *Config
 	Logger() log.Logger
 	FindTarget(string) (Target, error)
 	GetFirstTarget() (Target, error)
 }
 
 type exporter struct {
-	config  *config.Config
+	config  *Config
 	targets []Target
 
 	cur_target Target
@@ -41,7 +39,7 @@ type exporter struct {
 
 // NewExporter returns a new Exporter with the provided config.
 func NewExporter(configFile string, logger log.Logger) (Exporter, error) {
-	c, err := config.Load(configFile, logger)
+	c, err := Load(configFile, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -51,7 +49,7 @@ func NewExporter(configFile string, logger log.Logger) (Exporter, error) {
 		if len(c.Targets) > 1 {
 			return nil, fmt.Errorf("the config.data-source-name flag (value %q) only applies in single target mode", *dsnOverride)
 		} else {
-			c.Targets[0].DSN = config.Secret(*dsnOverride)
+			c.Targets[0].DSN = Secret(*dsnOverride)
 		}
 	}
 
@@ -165,7 +163,7 @@ func (e *exporter) Gather() ([]*dto.MetricFamily, error) {
 }
 
 // Config implements Exporter.
-func (e *exporter) Config() *config.Config {
+func (e *exporter) Config() *Config {
 	return e.config
 }
 

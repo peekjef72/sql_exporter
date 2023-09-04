@@ -1,0 +1,27 @@
+go:
+    cgo: true
+repository:
+    # path: github.com/peekjef72/db2_exporter
+    path: .
+build:
+    binaries:
+        - name: db2_exporter
+          path: .
+    flags: -tags db2
+    # -gcflags -I/opt/db2_exporter/lib/clidriver/include
+    ldflags: |
+        -L /opt/db2_exporter/lib/clidriver/lib
+        -X github.com/prometheus/common/version.Version={{.Version}}
+        -X github.com/prometheus/common/version.Revision={{.Revision}}
+        -X github.com/prometheus/common/version.Branch={{.Branch}}
+        -X github.com/prometheus/common/version.BuildDate={{date "20060102-15:04:05"}}
+        -X github.com/prometheus/common/version.BuildUser={{user}}@{{host}}
+    static: false
+tarball:
+    prefix: .
+    files:
+      - LICENSE
+      - README.md
+      - examples/db2_exporter.yml
+      - examples/db2_standard.collector.yml
+      - examples/targets

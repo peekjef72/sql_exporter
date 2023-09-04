@@ -1,0 +1,293 @@
+# A collector defining standard metrics for DB2 Server.
+#
+# It is required that the SQL Server user has the following permissions:
+#
+# ?
+#
+collector_name: db2_standard
+
+# Similar to global.min_interval, but applies to the queries defined by this collector only.
+#min_interval: 0s
+
+
+metrics:
+  - metric_name: start_timestamp_ms
+    help: db2 start unix timestamp in milliseconds labeled by server name and server version
+    type: gauge
+    key_labels:
+      - instance
+      - version
+    values:
+      - db2start_time
+    query: |
+      SELECT 
+        DB2START_TIME,
+        substr(SERVICE_LEVEL,6) as version,
+        current server as instance
+      FROM 
+        TABLE(snapshot_dbm(0)),
+        SYSIBMADM.ENV_INST_INFO,
+        sysibm.sysdummy1
+
+  # - metric_name: version
+  #   help: "DB2 version"
+  #   type: gauge
+  #   key_labels:
+  #     - version
+  #   values: [value]
+  #   query: |
+  #     SELECT 
+  #       SERVICE_LEVEL as version, 1 as value 
+  #     FROM SYSIBMADM.ENV_INST_INFO
+
+  # - metric_name: name
+  #   help: "Database name"
+  #   type: gauge
+  #   key_labels:
+  #     - server
+  #   values: [value]
+  #   query: |
+  #     select 
+  #       current server as server, 1 as value 
+  #     from sysibm.sysdummy1
+
+  - metric_name: status
+    help: "The current status of the instance of the database manager. 0: SQLM_ACTIVE - 1: SQLM_QUIESCE_PEND - 2: SQLM_QUIESCED - 3: SQLM_DB_ROLLFWD - 4: SQLM_DB_ACTIVE_STANDBY - 5: SQLM_DB_STANDBY"
+    type: gauge
+    values:
+      - status
+    query_ref: snapshot_database
+
+  - metric_name: connection
+    help: "Number of connections to the database"
+    type: gauge
+    values: [connections]
+    query: |
+      select 
+        COUNT(*) as connections
+      FROM
+        SYSIBMADM.APPLICATIONS
+
+  - metric_name: tablespace_total_bytes
+    help: Tablespaces total space in bytes.
+    type: gauge
+    key_labels:
+      - tablespace
+      - type
+      - page_size
+      - state
+    values: [total_bytes]
+    query_ref: tablespace
+
+  - metric_name: tablespace_used_bytes
+    help: Tablespaces used space in bytes.
+    type: gauge
+    key_labels:
+      - tablespace
+      - type
+      - page_size
+      - state
+    values: [used_bytes]
+    query_ref: tablespace
+
+  - metric_name: tablespace_free_bytes
+    help: Tablespaces free space in bytes.
+    type: gauge
+    key_labels:
+      - tablespace
+      - type
+      - page_size
+      - state
+    values: [free_bytes]
+    query_ref: tablespace
+
+  # buffer pool
+  - metric_name: bufferpool_total_hit_ratio
+    help: DB2 bufferpools TOTAL_HIT_RATIO_PERCENT.
+    type: gauge
+    key_labels:
+      - bp_name
+    values: [total_hit_ratio]
+    query_ref: bufferpool
+
+  - metric_name: bufferpool_index_hit_ratio
+    help: DB2 bufferpools INDEX_HIT_RATIO_PERCENT.
+    type: gauge
+    key_labels:
+      - bp_name
+    values: [idx_hit_ratio]
+    query_ref: bufferpool
+
+  - metric_name: bufferpool_bp_size_bytes
+    help: DB2 bufferpools size bytes.
+    type: gauge
+    key_labels:
+      - bp_name
+    values: [bp_size]
+    query_ref: bufferpool
+
+  - metric_name: bufferpool_hit_ratio
+    help: total hit ration
+    type: gauge
+    key_labels:
+      - bp_name
+    values: [hit_ratio]
+    query: |
+      SELECT
+        RTRIM(SUBSTR(BP_NAME,1,20)) as bp_name,
+        (POOL_DATA_L_READS - POOL_DATA_P_READS) * 100 / (POOL_DATA_L_READS + 1) as  hit_ratio
+      FROM
+        SYSIBMADM.SNAPBP
+
+  # locks
+  - metric_name: locks_held
+    help: number of locks currently held.
+    type: gauge
+    values:
+      - locks_held
+    query_ref: snapshot_database
+
+  - metric_name: locks_waiting
+    help: number of agents waiting on a lock.
+    type: gauge
+    values:
+      - locks_waiting
+    query_ref: snapshot_database
+
+  - metric_name: lock_wait_time
+    help: Total elapsed time spent waiting for locks(milliseconds).
+    type: gauge
+    values:
+      - lock_wait_time
+    query_ref: snapshot_database
+
+  - metric_name: deadlocks
+    help: The total number of deadlocks that have occurred.
+    type: gauge
+    values:
+      - deadlocks
+    query_ref: snapshot_database
+
+  - metric_name: locks_waits
+    help: The total number of times that applications or connections waited for locks.
+    type: gauge
+    values:
+      - lock_waits
+    query_ref: snapshot_database
+
+  - metric_name: lock_escals
+    help: number of times that locks have been escalated from several row locks to a table lock.
+    type: gauge
+    values:
+      - lock_escals
+    query_ref: snapshot_database
+
+  - metric_name: x_lock_escals
+    help: number of times that locks have been escalated to one exclusive table lock.
+    type: gauge
+    values:
+      - x_lock_escals
+    query_ref: snapshot_database
+
+  - metric_name: lock_timeouts
+    help: number of times that a request to lock an object timed out instead of being granted
+    type: gauge
+    values:
+      - lock_timeouts
+    query_ref: snapshot_database
+
+  # log
+  - metric_name: log_total_used_bytes
+    help: total amount of active log space currently used (in bytes) in the database, 
+    type: gauge
+    values:
+      - total_log_used
+    query_ref: snapshot_database
+
+  - metric_name: log_total_avail_bytes
+    help: amount of active log space in the database that is not being used by uncommitted transactions (in bytes)
+    type: gauge
+    values:
+      - total_log_avail
+    query_ref: snapshot_database
+
+  - metric_name: log_secondary_used_bytes
+    help: maximum amount of secondary log space used (in bytes)
+    type: gauge
+    values:
+      - sec_log_used
+    query_ref: snapshot_database
+
+  - metric_name: log_secondary_avail_bytes
+    help: total number of secondary log files that are currently being used for the database
+    type: gauge
+    values:
+      - sec_logs_alloc
+    query_ref: snapshot_database
+
+  # rows activity
+  - metric_name: row_activity
+    help: rows deleted - rows inserted - rows updated - rows selected
+    type: counter
+    value_label: type 
+    values:
+      - deleted
+      - inserted
+      - updated
+      - selected
+    query_ref: snapshot_database
+
+queries:
+
+  - query_name: tablespace
+    query: |
+      SELECT
+        RTRIM(substr(tbsp_name,1,20)) as TABLESPACE, 
+        RTRIM(substr(tbsp_content_type,1,10)) as TYPE, 
+        tbsp_page_size AS PAGE_SIZE,
+        RTRIM(substr(TBSP_STATE,1,10)) as state,
+        sum(tbsp_total_size_kb)*1024 as TOTAL_BYTES, 
+        sum(tbsp_used_size_kb)*1024 as USED_BYTES, 
+        sum(tbsp_free_size_kb)*1024 as FREE_BYTES
+      FROM 
+        SYSIBMADM.TBSP_UTILIZATION 
+      GROUP BY 
+        tbsp_name, tbsp_content_type,tbsp_page_size,TBSP_STATE
+
+  - query_name: bufferpool
+    query: |
+      SELECT 
+        RTRIM(SUBSTR(A.BP_NAME,1,20)) AS bp_name,
+        A.TOTAL_HIT_RATIO_PERCENT AS total_hit_ratio,
+        COALESCE(A.INDEX_HIT_RATIO_PERCENT, 0) AS idx_hit_ratio,
+        (B.BP_CUR_BUFFSZ * c.PAGESIZE ) as BP_SIZE 
+      FROM 
+        SYSIBMADM.BP_HITRATIO A, 
+        SYSIBMADM.SNAPBP_PART B, 
+        syscat.bufferpools C
+      WHERE 
+        a.bp_name = b.bp_name 
+        and b.bp_name = c.bpname
+
+  - query_name: snapshot_database
+    query: |
+      SELECT
+        LOCKS_HELD,
+        LOCK_WAITS,
+        LOCK_WAIT_TIME,
+        DEADLOCKS,
+        LOCK_ESCALS,
+        X_LOCK_ESCALS,
+        LOCKS_WAITING,
+        LOCK_TIMEOUTS,
+        TOTAL_LOG_USED,
+        TOTAL_LOG_AVAILABLE  as total_log_avail,
+        SEC_LOG_USED_TOP as sec_log_used,
+        SEC_LOGS_ALLOCATED as sec_logs_alloc,
+        ROWS_DELETED as deleted,
+        ROWS_INSERTED as inserted,
+        ROWS_UPDATED as updated,
+        ROWS_SELECTED as selected,
+        DB_STATUS as status
+      FROM 
+        TABLE(SNAPSHOT_DATABASE('{{ .params.database }}', -1))

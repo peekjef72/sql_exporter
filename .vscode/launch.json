@@ -9,16 +9,29 @@
             "type": "go",
             "request": "launch",
             "mode": "auto",
+            "envFile": "${workspaceFolder}/.env",
             "program": "${fileDirname}",
             "args": [
                 // "-V",
                 // "-h",
                 "--log.level", "debug",
-                "--config.file", "/etc/sql_exporter/sql_exporter-0.6.0.yml",
                 "--web.listen-address", ":9401",
-                "--dry-run", "--target", "LYNC"
-                // "--config.data-source-name", "prout",
-            ]
+                "--dry-run",
+
+                // "--config.file", "./db2_exporter.yml",
+                "--config.file", "./mssql_exporter.yml",
+                // "--config.file", "./oracle_exporter.yml",
+
+                //  "--target", "ROCS", // db2
+                // "--target", "EV6SMS", // db2
+
+                "--target", "LYNC", // mssql
+                // mssql server 2019
+                // "--target", "DEVMSSQLDB01", // mssql
+                // "--target", "DAT-D-DB003-MSSQLDB01", // mssql
+
+                // "--target", "BS12", //oracle
+            ],
         }
     ]
 }

@@ -1,4 +1,5 @@
-package sql_exporter
+// package db2_exporter
+package main
 
 import (
 	"context"
@@ -6,8 +7,6 @@ import (
 	"fmt"
 	"sync"
 	"time"
-
-	"github.com/peekjef72/sql_exporter/config"
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
@@ -18,12 +17,12 @@ import (
 // conceptually similar to a prometheus.Collector.
 type Collector interface {
 	// Collect is the equivalent of prometheus.Collector.Collect() but takes a context to run in and a database to run on.
-	Collect(context.Context, *sql.DB, chan<- Metric)
+	Collect(context.Context, *sql.DB, map[string]interface{}, chan<- Metric)
 }
 
 // collector implements Collector. It wraps a collection of queries, metrics and the database to collect them from.
 type collector struct {
-	config     *config.CollectorConfig
+	config     *CollectorConfig
 	queries    []*Query
 	logContext []interface{}
 	logger     log.Logger
@@ -34,13 +33,13 @@ type collector struct {
 func NewCollector(
 	logContext []interface{},
 	logger log.Logger,
-	cc *config.CollectorConfig,
+	cc *CollectorConfig,
 	constLabels []*dto.LabelPair) (Collector, error) {
 
 	logContext = append(logContext, "collector", cc.Name)
 
 	// Maps each query to the list of metric families it populates.
-	queryMFs := make(map[*config.QueryConfig][]*MetricFamily, len(cc.Metrics))
+	queryMFs := make(map[*QueryConfig][]*MetricFamily, len(cc.Metrics))
 
 	// Instantiate metric families.
 	for _, mc := range cc.Metrics {
@@ -83,13 +82,17 @@ func NewCollector(
 }
 
 // Collect implements Collector.
-func (c *collector) Collect(ctx context.Context, conn *sql.DB, ch chan<- Metric) {
+func (c *collector) Collect(
+	ctx context.Context,
+	conn *sql.DB,
+	symbols_table map[string]interface{},
+	ch chan<- Metric) {
 	var wg sync.WaitGroup
 	wg.Add(len(c.queries))
 	for _, q := range c.queries {
 		go func(q *Query) {
 			defer wg.Done()
-			q.Collect(ctx, conn, ch)
+			q.Collect(ctx, conn, symbols_table, ch)
 		}(q)
 	}
 	// Only return once all queries have been processed
@@ -121,7 +124,11 @@ type cachingCollector struct {
 }
 
 // Collect implements Collector.
-func (cc *cachingCollector) Collect(ctx context.Context, conn *sql.DB, ch chan<- Metric) {
+func (cc *cachingCollector) Collect(
+	ctx context.Context,
+	conn *sql.DB,
+	symbols_table map[string]interface{},
+	ch chan<- Metric) {
 	if ctx.Err() != nil {
 		ch <- NewInvalidMetric(cc.rawColl.logContext, ctx.Err())
 		return
@@ -142,7 +149,7 @@ func (cc *cachingCollector) Collect(ctx context.Context, conn *sql.DB, ch chan<-
 			cacheChan := make(chan Metric, capMetricChan)
 			cc.cache = make([]Metric, 0, len(cc.cache))
 			go func() {
-				cc.rawColl.Collect(ctx, conn, cacheChan)
+				cc.rawColl.Collect(ctx, conn, symbols_table, cacheChan)
 				close(cacheChan)
 			}()
 			for metric := range cacheChan {

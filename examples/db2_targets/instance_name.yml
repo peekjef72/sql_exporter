@@ -1,0 +1,13 @@
+# specify all configuration elements for the instance
+# name: the name to identify the instance; it is used as target value by prometheus /metrics?target=name
+name: MY_INSTANCE_NAME
+
+# Data source name always has a URI schema that matches the driver name..
+data_source_name: "db2://<hostname>:<port>?user%20id=<login>&password=<password>&database=<database>"
+# or basic format
+#data_source_name: DATABASE=<database>; HOSTNAME=<hostname>; PORT=<port>; PROTOCOL=<protocol>; UID=<login>; PWD=<password>;
+
+# Collectors (referenced by name) to execute on the target.
+# this should be sandard ans specific metrics
+collectors:
+  - db2_standard

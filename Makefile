@@ -18,11 +18,14 @@ pkgs    = $(shell $(GO) list ./... | grep -v /vendor/)
 
 PREFIX              ?= $(shell pwd)
 BIN_DIR             ?= $(shell pwd)
-DOCKER_IMAGE_NAME   ?= sql-exporter
+BASE_DIR            ?= $(shell dirname $(BIN_DIR))
+MSSQL_DIR			?= $(BASE_DIR)/mssql_exporter
+DB2_DIR				?= $(BASE_DIR)/db2_exporter
+DOCKER_IMAGE_NAME   ?= mssql-exporter
 DOCKER_IMAGE_TAG    ?= $(subst /,-,$(shell git rev-parse --abbrev-ref HEAD))
 
 
-all: promu build test
+all: promu build build-db2
 
 style:
 	@echo ">> checking code style"
@@ -41,12 +44,43 @@ vet:
 	@$(GO) vet $(pkgs)
 
 build: promu
-	@echo ">> building binaries"
-	@$(PROMU) build --prefix $(PREFIX)
+	@echo ">> building MSSQL binaries"
+	@$(PROMU) build --prefix $(PREFIX) -v
+
+build-ora: promu
+	@echo ">> building ORACLE binaries"
+	@$(PROMU) build --prefix $(PREFIX) --config=.promu-oracle.yml
+
+build-db2: promu
+	@echo ">> building DB2 binaries"
+	@$(PROMU) build --prefix $(PREFIX) --config=.promu-db2.yml
 
 tarball: promu
 	@echo ">> building release tarball"
-	@$(PROMU) tarball --prefix $(PREFIX) $(BIN_DIR)
+	@mv $(BIN_DIR)/examples/mssql_targets $(BIN_DIR)/examples/targets
+	@echo ">>> renaming directory to $(MSSQL_DIR)"
+	@ln -s $(BIN_DIR) $(MSSQL_DIR)
+	@cd $(MSSQL_DIR) && $(PROMU) tarball --prefix $(MSSQL_DIR) $(MSSQL_DIR)
+	@mv $(BIN_DIR)/examples/targets $(BIN_DIR)/examples/mssql_targets
+	@rm $(MSSQL_DIR)
+
+tarball-db2: promu
+	@echo ">> building DB2 release tarball"
+	@mv $(BIN_DIR)/examples/db2_targets $(BIN_DIR)/examples/targets
+	@echo ">>> renaming directory to $(DB2_DIR)"
+	@ln -s $(BIN_DIR) $(DB2_DIR)
+	@cd $(DB2_DIR) && $(PROMU) tarball --prefix $(DB2_DIR) --config=.promu-db2.yml $(DB2_DIR)
+	@mv $(BIN_DIR)/examples/targets $(BIN_DIR)/examples/db2_targets
+	@rm $(DB2_DIR)
+
+tarball-ora: promu
+	@echo ">> building ORACLE release tarball"
+	@mv $(BIN_DIR)/examples/oracle_targets $(BIN_DIR)/examples/targets
+	@echo ">>> renaming directory to $(ORACLE_DIR)"
+	@ln -s $(BIN_DIR) $(ORACLE_DIR)
+	@cd $(ORACLE_DIR) && $(PROMU) tarball --prefix $(ORACLE_DIR) --config=.promu-oracle.yml $(ORACLE_DIR)
+	@mv $(BIN_DIR)/examples/targets $(BIN_DIR)/examples/oracle_targets
+	@rm $(ORACLE_DIR)
 
 docker:
 	@echo ">> building docker image"

@@ -1,0 +1,63 @@
+# collector to obtain metrics on MECM hosted in mssql server
+
+collector_name: mecm
+namespace: mecm
+
+metrics:
+  - metric_name: status
+    help: "element status: 0: ok 1: ..."
+    type: gauge
+    key_labels:
+      - sitecode
+      - sitesystem
+      - role
+      - storageobject
+    values:
+      - status
+    query_ref: query1
+
+  - metric_name: total_bytes
+    help: "volume in bytes"
+    type: gauge
+    key_labels:
+      - sitecode
+      - sitesystem
+      - role
+      - storageobject
+    values:
+      - bytestotal
+    query_ref: query1
+
+#***********************
+queries:
+  # Populates `io_stall` and `io_stall_total`
+  - query_name: query1
+    query: |
+      SELECT 
+        DISTINCT v_SiteSystemSummarizer.Status as status, 
+        sitecode, 
+        LOWER(
+          SUBSTRING(
+            SiteSystem, 
+            CHARINDEX('\\', SiteSystem) + 2, 
+            CHARINDEX('"]', SiteSystem) - CHARINDEX('\\', SiteSystem) -3
+          )
+        ) AS sitesystem,
+        REPLACE(Role, 'SMS ', '') role, 
+        LOWER(
+          SUBSTRING(
+            SiteObject, 
+            CHARINDEX('Display=', SiteObject) + 8, 
+            CHARINDEX('"]', SiteObject) - CHARINDEX('Display=', SiteObject) -9
+          )
+        ) AS storageobject, 
+        ObjectType, 
+        bytestotal, 
+        CAST(
+          BytesFree / 1024 / 1024 AS VARCHAR(49)
+        ) + ' Go' Free, 
+        PercentFree 
+      FROM 
+        v_SiteSystemSummarizer 
+      Order By 
+        StorageObject

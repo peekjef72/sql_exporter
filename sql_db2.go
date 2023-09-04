@@ -1,4 +1,4 @@
-//go:build !db2 && mssql && !oracle
+//go:build db2 && !mssql && !oracle
 
 package main
 
@@ -8,9 +8,9 @@ import (
 	"fmt"
 	"strings"
 
-	_ "github.com/denisenkom/go-mssqldb" // register the MS-SQL driver
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
+	_ "github.com/ibmdb/go_ibm_db" // register the DB2 driver
 )
 
 // OpenConnection extracts the driver name from the DSN (expected as the URI scheme), adjusts it where necessary (e.g.
@@ -50,12 +50,13 @@ func OpenConnection(
 	dsn string,
 	maxConns, maxIdleConns int,
 	symbol_table map[string]interface{}) (*sql.DB, error) {
-
 	var driver string
+
 	// Extract driver name from DSN.
 	idx := strings.Index(dsn, "://")
 	if idx == -1 {
-		driver = "sqlserver"
+		//return nil, fmt.Errorf("missing driver in data source name. Expected format `<driver>://<dsn>`")
+		driver = "db2"
 	} else {
 		driver = dsn[:idx]
 	}
@@ -63,9 +64,9 @@ func OpenConnection(
 	// Adjust DSN, where necessary.
 	var params map[string]string
 	switch driver {
-	case "sqlserver":
+	case "db2":
 		var err error
-		if strings.HasPrefix(dsn, "sqlserver://") {
+		if strings.HasPrefix(dsn, "db2://") {
 			// "db2://<hostname>:<port>?user%20id=<login>&password=<password>&database=<database>&protocol=..."
 			params, err = splitConnectionStringURL(dsn)
 			if err != nil {
@@ -91,14 +92,52 @@ func OpenConnection(
 		if !ok {
 			return nil, fmt.Errorf("password has to be set")
 		}
-		// val, ok = params["database"]
-		// if !ok || val == "" {
-		// 	return nil, fmt.Errorf("database must be set")
-		// }
+		val, ok = params["database"]
+		if !ok || val == "" {
+			return nil, fmt.Errorf("database must be set")
+		}
 
+		new_dns := new(strings.Builder)
+		// Hostname
+		new_dns.WriteString("HOSTNAME=")
+		new_dns.WriteString(params["server"])
+		new_dns.WriteString("; ")
+
+		// Port
+		new_dns.WriteString("PORT=")
+		if params["port"] != "" {
+			new_dns.WriteString(params["port"])
+			new_dns.WriteString("; ")
+		} else {
+			new_dns.WriteString("60000; ")
+		}
+		// Database
+		new_dns.WriteString("DATABASE=")
+		new_dns.WriteString(params["database"])
+		new_dns.WriteString("; ")
+
+		// Protocol
+		new_dns.WriteString("PROTOCOL=")
+		if params["protocol"] != "" {
+			new_dns.WriteString(params["protocol"])
+			new_dns.WriteString("; ")
+		} else {
+			new_dns.WriteString("TCPIP; ")
+		}
+		// user
+		new_dns.WriteString("UID=")
+		new_dns.WriteString(params["user id"])
+		new_dns.WriteString("; ")
+		// password
+		new_dns.WriteString("PWD=")
+		new_dns.WriteString(params["password"])
+		new_dns.WriteString("; ")
+
+		dsn = new_dns.String()
 		// add params to target symbol table
 		symbol_table["params"] = params
 
+		driver = "go_ibm_db"
 	default:
 		return nil, fmt.Errorf("driver '%s' not supported", driver)
 	}
