@@ -139,7 +139,17 @@ metrics:
       FROM MarketPrices
       GROUP BY Market
 ```
+### target file
 
+```yaml
+name: "target_name"
+data_source_name: "sqlserver://nowhere:1434/instance_2?user%20id=domain\\user&password={Xöe8;vhmbr4yYEL0~Ybfg}&database=myDatabase"
+
+# Collectors (referenced by name) to execute on the target.
+collectors:
+  - mssql_standard
+
+```
 ### Data Source Names
 
 To keep things simple and yet allow fully configurable database connections to be set up, SQL Exporter uses DSNs (like

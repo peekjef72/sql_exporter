@@ -22,6 +22,7 @@ metrics:
       - chartset
       - sortorder
       - maxconnection
+      - dbhostname
     query: |
       select SERVERPROPERTY('ProductVersion') as version,
       SERVERPROPERTY('Edition') as edition,
@@ -29,6 +30,7 @@ metrics:
       SERVERPROPERTY('SqlCharSetName') as chartset,
       SERVERPROPERTY('SqlSortOrderName') as sortorder,
       @@MAX_CONNECTIONS as maxconnection,
+      SERVERPROPERTY('ComputerNamePhysicalNetBIOS') as dbhostname,
       1 as value
 
   - metric_name: cpu_count
