@@ -19,3 +19,5 @@
 .env
 
 targets/
+
+mssql_exporter

@@ -7,7 +7,8 @@ build:
     binaries:
         - name: mssql_exporter
           path: .
-    flags: -tags mssql
+    flags: -tags mssql,netgo,usergo
+    static: true
     ldflags: |
       -X github.com/prometheus/common/version.Version={{.Version}}
       -X github.com/prometheus/common/version.Revision={{.Revision}}
@@ -21,4 +22,4 @@ tarball:
       - README.md
       - examples/mssql_exporter.yml
       - examples/mssql_standard.collector.yml
-      - examples/targets
+      - examples/mssql_targets
