@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	_ "github.com/denisenkom/go-mssqldb" // register the MS-SQL driver
-	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 )
 
@@ -22,37 +21,42 @@ import (
 // dynamic way of loading a third party driver library (as e.g. with Java classpaths), so any driver additions require
 // a binary rebuild.
 //
-// MySQL
+// # MySQL
 //
 // Using the https://github.com/go-sql-driver/mysql driver, DSN format (passed to the driver stripped of the `mysql://`
 // prefix):
-//   mysql://username:password@protocol(host:port)/dbname?param=value
 //
-// PostgreSQL
+//	mysql://username:password@protocol(host:port)/dbname?param=value
+//
+// # PostgreSQL
 //
 // Using the https://godoc.org/github.com/lib/pq driver, DSN format (passed through to the driver unchanged):
-//   postgres://username:password@host:port/dbname?param=value
 //
-// MS SQL Server
+//	postgres://username:password@host:port/dbname?param=value
+//
+// # MS SQL Server
 //
 // Using the https://github.com/denisenkom/go-mssqldb driver, DSN format (passed through to the driver unchanged):
-//   sqlserver://username:password@host:port/instance?param=value
 //
-// Clickhouse
+//	sqlserver://username:password@host:port/instance?param=value
+//
+// # Clickhouse
 //
 // Using the https://github.com/kshvakov/clickhouse driver, DSN format (passed to the driver with the`clickhouse://`
 // prefix replaced with `tcp://`):
-//   clickhouse://host:port?username=username&password=password&database=dbname&param=value
-func OpenConnection(
-	ctx context.Context,
-	logContext []interface{},
-	logger log.Logger,
-	dsn string,
-	maxConns, maxIdleConns int,
-	symbol_table map[string]interface{}) (*sql.DB, error) {
+//
+//	clickhouse://host:port?username=username&password=password&database=dbname&param=value
+func OpenConnection(ctx context.Context, t *target) (*sql.DB, error) {
+	// ctx context.Context,
+	// logContext []interface{},
+	// logger log.Logger,
+	// dsn string,
+	// maxConns, maxIdleConns int,
+	// symbol_table map[string]interface{}) (*sql.DB, error) {
 
 	var driver string
 	// Extract driver name from DSN.
+	dsn := string(t.config.DSN)
 	idx := strings.Index(dsn, "://")
 	if idx == -1 {
 		driver = "sqlserver"
@@ -97,7 +101,7 @@ func OpenConnection(
 		// }
 
 		// add params to target symbol table
-		symbol_table["params"] = params
+		t.symtab["params"] = params
 
 	default:
 		return nil, fmt.Errorf("driver '%s' not supported", driver)
@@ -122,11 +126,11 @@ func OpenConnection(
 		}
 	}
 
-	conn.SetMaxIdleConns(maxIdleConns)
-	conn.SetMaxOpenConns(maxConns)
+	conn.SetMaxIdleConns(t.globalConfig.MaxIdleConns)
+	conn.SetMaxOpenConns(t.globalConfig.MaxConns)
 
-	logContext = append(logContext, "msg", fmt.Sprintf("Database handle successfully opened with driver %s.", driver))
-	level.Debug(logger).Log(logContext...)
+	t.logContext = append(t.logContext, "msg", fmt.Sprintf("Database handle successfully opened with driver %s.", driver))
+	level.Debug(t.logger).Log(t.logContext...)
 
 	return conn, nil
 }

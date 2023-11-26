@@ -77,8 +77,7 @@ func splitConnectionStringURL(dsn string) (map[string]string, error) {
 	return res, nil
 }
 
-//
-//#DATABASE=<database>; HOSTNAME=<hostname>; PORT=<port>; PROTOCOL=<protocol>; UID=<login>; PWD=<password>;
+// #DATABASE=<database>; HOSTNAME=<hostname>; PORT=<port>; PROTOCOL=<protocol>; UID=<login>; PWD=<password>;
 func splitRawConnectionStringDSN(dsn string) (map[string]string, error) {
 	res := map[string]string{}
 	m := make(url.Values)
