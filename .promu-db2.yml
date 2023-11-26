@@ -7,7 +7,7 @@ build:
     binaries:
         - name: db2_exporter
           path: .
-    flags: -tags db2
+    flags: -tags netgo,usergo,static,db2
     # -gcflags -I/opt/db2_exporter/lib/clidriver/include
     ldflags: |
         -L /opt/db2_exporter/lib/clidriver/lib

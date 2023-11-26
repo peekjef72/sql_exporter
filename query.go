@@ -134,15 +134,18 @@ func (q *Query) Collect(
 	ctx context.Context,
 	conn *sql.DB,
 	symbols_table map[string]interface{},
-	ch chan<- Metric) {
+	met_ch chan<- Metric,
+	coll_ch chan<- int) {
 	if ctx.Err() != nil {
-		ch <- NewInvalidMetric(q.logContext, ctx.Err())
+		met_ch <- NewInvalidMetric(q.logContext, ctx.Err())
+		coll_ch <- 0
 		return
 	}
 	rows, err := q.run(ctx, conn, symbols_table)
 	if err != nil {
 		// TODO: increment an error counter
-		ch <- NewInvalidMetric(q.logContext, err)
+		met_ch <- NewInvalidMetric(q.logContext, err)
+		coll_ch <- 0
 		return
 	}
 
@@ -153,21 +156,24 @@ func (q *Query) Collect(
 	dest, err := q.scanDest(rows)
 	if err != nil {
 		// TODO: increment an error counter
-		ch <- NewInvalidMetric(q.logContext, err)
+		met_ch <- NewInvalidMetric(q.logContext, err)
+		coll_ch <- 0
 		return
 	}
 	for rows.Next() {
 		row, err := q.scanRow(rows, dest)
 		if err != nil {
-			ch <- NewInvalidMetric(q.logContext, err)
+			met_ch <- NewInvalidMetric(q.logContext, err)
+			coll_ch <- 0
 			continue
 		}
 		for _, mf := range q.metricFamilies {
-			mf.Collect(row, ch)
+			mf.Collect(row, met_ch, coll_ch)
 		}
 	}
 	if err1 := rows.Err(); err1 != nil {
-		ch <- NewInvalidMetric(q.logContext, err1)
+		met_ch <- NewInvalidMetric(q.logContext, err1)
+		coll_ch <- 0
 	}
 }
 

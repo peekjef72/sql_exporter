@@ -19,7 +19,7 @@
                 "--dry-run",
 
                 // "--config.file", "./db2_exporter.yml",
-                "--config.file", "./mssql_exporter.yml",
+                "--config.file", "config/mssql/mssql_exporter.yml",
                 // "--config.file", "./oracle_exporter.yml",
 
                 //  "--target", "ROCS", // db2

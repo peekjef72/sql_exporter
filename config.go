@@ -3,8 +3,10 @@ package main
 import (
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -16,7 +18,7 @@ import (
 )
 
 // Load attempts to parse the given config file and return a Config object.
-func Load(configFile string, logger log.Logger) (*Config, error) {
+func LoadConfig(configFile string, logger log.Logger, collectorName string) (*Config, error) {
 	level.Info(logger).Log("msg", fmt.Sprintf("Loading configuration from %s", configFile))
 	buf, err := os.ReadFile(configFile)
 	if err != nil {
@@ -24,8 +26,9 @@ func Load(configFile string, logger log.Logger) (*Config, error) {
 	}
 
 	c := Config{
-		configFile: configFile,
-		logger:     logger,
+		configFile:    configFile,
+		logger:        logger,
+		collectorName: collectorName,
 	}
 	err = yaml.Unmarshal(buf, &c)
 	if err != nil {
@@ -41,13 +44,16 @@ func Load(configFile string, logger log.Logger) (*Config, error) {
 
 // Config is a collection of targets and collectors.
 type Config struct {
-	Globals        *GlobalConfig      `yaml:"global"`
-	CollectorFiles []string           `yaml:"collector_files,omitempty"`
-	Targets        []*TargetConfig    `yaml:"targets,omitempty"`
-	Collectors     []*CollectorConfig `yaml:"collectors,omitempty"`
+	Globals        *GlobalConfig          `yaml:"global"`
+	CollectorFiles []string               `yaml:"collector_files,omitempty"`
+	Targets        []*TargetConfig        `yaml:"targets,omitempty"`
+	Collectors     []*CollectorConfig     `yaml:"collectors,omitempty"`
+	AuthConfigs    map[string]*AuthConfig `yaml:"auth_configs,omitempty"`
 
 	configFile string
 	logger     log.Logger
+	// collectorName is a restriction: collectors set for a target are replaced by this only one.
+	collectorName string
 
 	// Catches all undefined fields and must be empty after parsing.
 	XXX map[string]interface{} `yaml:",inline" json:"-"`
@@ -73,7 +79,7 @@ func (c *Config) UnmarshalYAML(unmarshal func(interface{}) error) error {
 
 	// Populate collector references for the target/jobs.
 	colls := make(map[string]*CollectorConfig)
-	for _, coll := range c.Collectors {
+	for id, coll := range c.Collectors {
 		// Set the min interval to the global default if not explicitly set.
 		if coll.MinInterval < 0 {
 			coll.MinInterval = c.Globals.MinInterval
@@ -82,6 +88,7 @@ func (c *Config) UnmarshalYAML(unmarshal func(interface{}) error) error {
 			return fmt.Errorf("duplicate collector name: %s", coll.Name)
 		}
 		colls[coll.Name] = coll
+		coll.id = fmt.Sprintf("%02d", id)
 	}
 	for _, t := range c.Targets {
 		if len(t.TargetsFiles) > 0 {
@@ -204,6 +211,15 @@ func (c *Config) loadTargetsFiles(targetFilepath []string) error {
 	return nil
 }
 
+func (c *Config) FindAuthConfig(auth_name string) *AuthConfig {
+	var auth *AuthConfig
+	auth, found := c.AuthConfigs[auth_name]
+	if !found {
+		return nil
+	}
+	return auth
+}
+
 // GlobalConfig contains globally applicable defaults.
 type GlobalConfig struct {
 	MinInterval   model.Duration `yaml:"min_interval"`          // minimum interval between query executions, default is 0
@@ -211,7 +227,8 @@ type GlobalConfig struct {
 	TimeoutOffset model.Duration `yaml:"scrape_timeout_offset"` // offset to subtract from timeout in seconds
 	MaxConns      int            `yaml:"max_connections"`       // maximum number of open connections to any one target
 	MaxIdleConns  int            `yaml:"max_idle_connections"`  // maximum number of idle connections to any one target
-	NameSpace     string         `yaml:"namespace"`             // prefix to add to all metric name (prifx + '_')
+	NameSpace     string         `yaml:"namespace"`             // prefix to add to all metric name (prefix + '_')
+	ExporterName  string         `yaml:"exporter_name,omitempty"`
 
 	// Catches all undefined fields and must be empty after parsing.
 	XXX map[string]interface{} `yaml:",inline" json:"-"`
@@ -227,6 +244,7 @@ func (g *GlobalConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	g.TimeoutOffset = model.Duration(500 * time.Millisecond)
 	g.MaxConns = 3
 	g.MaxIdleConns = 3
+	g.ExporterName = exporter_name_for_human
 
 	type plain GlobalConfig
 	if err := unmarshal((*plain)(g)); err != nil {
@@ -250,8 +268,11 @@ func (g *GlobalConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 
 // TargetConfig defines a DSN and a set of collectors to be executed on it.
 type TargetConfig struct {
-	Name          string            `yaml:"name"`                    // data source name to connect to
-	DSN           Secret            `yaml:"data_source_name"`        // data source definition to connect to
+	Name       string     `yaml:"name"`             // data source name to connect to
+	DSN        Secret     `yaml:"data_source_name"` // data source definition to connect to
+	AuthName   string     `yaml:"auth_name,omitempty"`
+	AuthConfig AuthConfig `yaml:"auth_mode,omitempty"`
+
 	Labels        map[string]string `yaml:"labels,omitempty"`        // labels to apply to all metrics collected from the targets
 	CollectorRefs []string          `yaml:"collectors"`              // names of collectors to execute on the target
 	TargetsFiles  []string          `yaml:"targets_files,omitempty"` // slice of path and pattern for files that contains targets
@@ -304,6 +325,10 @@ func (t *TargetConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 			}
 		}
 	}
+	if t.AuthConfig.Mode == "" {
+		t.AuthConfig.Mode = "basic"
+	}
+
 	return checkOverflow(t.XXX, "target")
 }
 
@@ -328,6 +353,31 @@ func (t *TargetConfig) checkLabelCollisions() error {
 	return nil
 }
 
+// method to build a temporary TargetConfig from "default" with host_name & and auth_name
+func (t *TargetConfig) Clone(host_path string, auth_name string) (*TargetConfig, error) {
+	new := &TargetConfig{
+		Name:       host_path,
+		DSN:        Secret(host_path),
+		AuthConfig: t.AuthConfig,
+		Labels:     t.Labels,
+		collectors: t.collectors,
+	}
+
+	url_elmt, err := url.Parse(host_path)
+	if err != nil {
+		return nil, err
+	}
+
+	if url_elmt.User.Username() != "" {
+		new.AuthConfig.Username = url_elmt.User.Username()
+		if tmp, set := url_elmt.User.Password(); set {
+			new.AuthConfig.Password = Secret(tmp)
+		}
+		new.AuthConfig.Mode = "basic"
+	}
+	return new, nil
+}
+
 //
 // Collectors
 //
@@ -339,6 +389,9 @@ type CollectorConfig struct {
 	MinInterval model.Duration  `yaml:"min_interval,omitempty"` // minimum interval between query executions
 	Metrics     []*MetricConfig `yaml:"metrics"`                // metrics/queries defined by this collector
 	Queries     []*QueryConfig  `yaml:"queries,omitempty"`      // named queries defined by this collector
+
+	// id to print in log and to follow request action
+	id string
 
 	// Catches all undefined fields and must be empty after parsing.
 	XXX map[string]interface{} `yaml:",inline" json:"-"`
@@ -536,6 +589,43 @@ func (s Secret) MarshalYAML() (interface{}, error) {
 	}
 	return nil, nil
 }
+
+type AuthConfig struct {
+	Mode     string `yaml:"mode,omitempty"` // basic, encrypted, bearer
+	Username string `yaml:"user,omitempty"`
+	Password Secret `yaml:"password,omitempty"`
+	Token    Secret `yaml:"token,omitempty"`
+	authKey  string
+}
+
+// UnmarshalYAML implements the yaml.Unmarshaler interface for authConfig
+func (auth *AuthConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
+	type plain AuthConfig
+	if err := unmarshal((*plain)(auth)); err != nil {
+		return err
+	}
+
+	// Check required fields
+	if auth.Mode == "" {
+		auth.Mode = "basic"
+	} else {
+		auth.Mode = strings.ToLower(auth.Mode)
+		mode := make(map[string]int)
+		for _, val := range []string{"basic", "token", "script"} {
+			mode[val] = 1
+		}
+		if _, err := mode[auth.Mode]; !err {
+			return fmt.Errorf("invalid mode auth %s", auth.Mode)
+		}
+	}
+	if auth.Mode == "token" && auth.Token == "" {
+		return fmt.Errorf("token not set with auth mode 'token'")
+	}
+
+	return nil
+}
+
+// *************************************************************************************************
 func checkCollectorRefs(collectorRefs []string, ctx string) error {
 	// At least one collector, no duplicates
 	if len(collectorRefs) == 0 {
@@ -555,11 +645,21 @@ func resolveCollectorRefs(
 	collectorRefs []string, collectors map[string]*CollectorConfig, ctx string) ([]*CollectorConfig, error) {
 	resolved := make([]*CollectorConfig, 0, len(collectorRefs))
 	for _, cref := range collectorRefs {
-		c, found := collectors[cref]
-		if !found {
-			return nil, fmt.Errorf("unknown collector %q referenced in %s", cref, ctx)
+		// check if cref(a collector name) is a pattern or not
+		if strings.HasPrefix(cref, "~") {
+			pat := regexp.MustCompile(cref[1:])
+			for c_name, c := range collectors {
+				if pat.MatchString(c_name) {
+					resolved = append(resolved, c)
+				}
+			}
+		} else {
+			c, found := collectors[cref]
+			if !found {
+				return nil, fmt.Errorf("unknown collector %q referenced in %s", cref, ctx)
+			}
+			resolved = append(resolved, c)
 		}
-		resolved = append(resolved, c)
 	}
 	return resolved, nil
 }

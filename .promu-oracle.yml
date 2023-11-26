@@ -7,7 +7,7 @@ build:
     binaries:
         - name: oracle_exporter
           path: .
-    flags: -a -tags oracle -v
+    flags: -tags netgo,usergo,static,oracle
     # -gcflags -I/opt/db2_exporter/lib/clidriver/include
         # -I /usr/include/oracle/19.16/client64
         # -L /usr/lib/oracle/19.16/client64/lib
@@ -15,7 +15,7 @@ build:
         -X github.com/prometheus/common/version.Version={{.Version}}
         -X github.com/prometheus/common/version.Revision={{.Revision}}
         -X github.com/prometheus/common/version.Branch={{.Branch}}
-        -X github.com/prometheus/common/version.BuildDate={{date "20060102-15:04:05"}}
+        -X github.com/prometheus/common/version.BuildDate={{date "2006/01/02-15:04:05"}}
         -X github.com/prometheus/common/version.BuildUser={{user}}@{{host}}
     # static: false
 tarball:

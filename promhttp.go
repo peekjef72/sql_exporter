@@ -12,8 +12,6 @@ import (
 	"sync"
 	"time"
 
-	// "github.com/peekjef72/db2_exporter"
-
 	"github.com/go-kit/log/level"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/expfmt"
@@ -29,24 +27,74 @@ const (
 // ExporterHandlerFor returns an http.Handler for the provided Exporter.
 func ExporterHandlerFor(exporter Exporter) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		var (
+			err    error
+			target Target
+			tmp_t  *TargetConfig
+		)
+
+		params := req.URL.Query()
+
+		tname := params.Get("target")
+		if tname == "" {
+			err := fmt.Errorf("Target parameter is missing")
+			HandleError(http.StatusBadRequest, err, *metricsPath, exporter, w, req)
+			return
+		}
+
+		target, err = exporter.FindTarget(tname)
+		if err == ErrTargetNotFound {
+			model := params.Get("model")
+			if model == "" {
+				model = "default"
+			}
+			t_def, err := exporter.FindTarget(model)
+			if err != nil {
+				err := fmt.Errorf("Target model '%s' not found: %s", model, err)
+				HandleError(http.StatusNotFound, err, *metricsPath, exporter, w, req)
+				return
+			}
+			if tmp_t, err = t_def.Config().Clone(tname, ""); err != nil {
+				err := fmt.Errorf("invalid url set for remote_target '%s' %s", tname, err)
+				HandleError(http.StatusInternalServerError, err, *metricsPath, exporter, w, req)
+				return
+			}
+			target, err = exporter.AddTarget(tmp_t)
+			if err != nil {
+				err := fmt.Errorf("unable to create temporary target %s", err)
+				HandleError(http.StatusInternalServerError, err, *metricsPath, exporter, w, req)
+				return
+			}
+			exporter.Config().Targets = append(exporter.Config().Targets, tmp_t)
+		} else if err != nil {
+			HandleError(http.StatusNotFound, err, *metricsPath, exporter, w, req)
+			return
+		}
+
+		// set authentication for target if one is specified and it differs from target internal
+		auth_name := params.Get("auth_name")
+		if auth_name != "" && target.Config().AuthName != auth_name {
+			auth := exporter.Config().FindAuthConfig(auth_name)
+			if auth != nil {
+				target.Config().AuthConfig = *auth
+				target.SetSymbol("auth_mode", auth.Mode)
+				target.SetSymbol("user", auth.Username)
+				target.SetSymbol("password", string(auth.Password))
+				target.SetSymbol("auth_token", string(auth.Token))
+				target.Config().AuthName = auth_name
+			}
+		}
+
+		auth_key := params.Get("auth_key")
+		if auth_key != "" {
+			target.SetSymbol("auth_key", auth_key)
+		}
+
 		ctx, cancel := contextFor(req, exporter)
 		defer cancel()
 
-		params := req.URL.Query()
-		tname := params.Get("target")
-		if tname == "" {
-			http.Error(w, "Target parameter is missing", 400)
-			return
-		}
-
-		t, err := exporter.FindTarget(tname)
-		if err != nil {
-			http.Error(w, err.Error(), 404)
-			return
-		}
-
 		// Go through prometheus.Gatherers to sanitize and sort metrics.
-		gatherer := prometheus.Gatherers{exporter.WithContext(ctx, t)}
+		gatherer := prometheus.Gatherers{exporter.WithContext(ctx, target)}
 		mfs, err := gatherer.Gather()
 		if err != nil {
 			level.Error(exporter.Logger()).Log("msg", fmt.Sprintf("Error gathering metrics: %s", err))

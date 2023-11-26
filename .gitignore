@@ -17,7 +17,9 @@
 .vscode/
 
 .env
+/config/
 
-targets/
-
-mssql_exporter
+/mssql_exporter
+/db2_exporter
+/oracle_exporter
+/postgres_exporter

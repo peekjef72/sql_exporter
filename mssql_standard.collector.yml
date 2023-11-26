@@ -1,3 +1,4 @@
+#SECTION-GLOBAL
 # A collector defining standard metrics for Microsoft SQL Server.
 #
 # It is required that the SQL Server user has the following permissions:
@@ -61,7 +62,7 @@ metrics:
     values: [count]
     query: |
       SELECT 
-        DB_NAME(sp.dbid) AS db,
+        ISNULL(DB_NAME(sp.dbid),'Unknown') AS db,
         replace(sp.status, ' ', '') as status,
         COUNT(sp.spid) AS count
       FROM sys.sysprocesses sp
@@ -319,14 +320,6 @@ metrics:
     key_labels:
       - jobname
 
-  # - metric_name: jobs_schedule
-  #   type: gauge
-  #   help: 'the schedule state of the job: 0=not scheduled 1=scheduled.'
-  #   values: [jobscheduled]
-  #   query_ref: jobs
-  #   key_labels:
-  #     - jobname
-
 queries:
   # Populates `io_stall` and `io_stall_total`
   - query_name: io_stall
@@ -374,20 +367,3 @@ queries:
       FROM msdb.dbo.sysjobs j
       JOIN msdb.dbo.sysjobservers js on js.job_id = j.job_id
     # where j.enabled = 1
-
-    # try to add schedule part for job...
-    # query: |
-    #   SELECT
-    #     j.name as jobname,
-    #     datediff(second, '19700101', iif(js.last_run_date > 0, 
-    #           datetimefromparts(js.last_run_date/10000, js.last_run_date/100%100, js.last_run_date%100, 
-    #           js.last_run_time/10000, js.last_run_time/100%100, js.last_run_time%100, 0), 
-    #           '19700101')) as lastrun_timestamp,
-    #     j.enabled as jobstatus,
-    #     js.last_run_outcome as jobrunstatus,
-    #     sc.enabled as jobscheduled
-    #   FROM msdb.dbo.sysjobs j
-    #   JOIN msdb.dbo.sysjobservers js on js.job_id = j.job_id
-    #   JOIN msdb.dbo.sysjobschedules jsc on jsc.job_id = j.job_id
-    #   LEFT JOIN msdb.dbo.sysschedules sc on sc.schedule_id = jsc.schedule_id
-
