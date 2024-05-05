@@ -2,11 +2,12 @@ go:
     cgo: false
 repository:
     path: github.com/peekjef72/sql_exporter
+    path: .
 build:
     binaries:
         - name: mssql_exporter
-        #   path: .
-    flags: -tags netgo,usergo,static,mssql
+          path: .
+    flags: -tags mssql
     ldflags: |
       -X github.com/prometheus/common/version.Version={{.Version}}
       -X github.com/prometheus/common/version.Revision={{.Revision}}
@@ -18,6 +19,4 @@ tarball:
     files:
       - LICENSE
       - README.md
-      - examples/mssql_exporter.yml
-      - examples/mssql_standard.collector.yml
-      - examples/targets
+      - config

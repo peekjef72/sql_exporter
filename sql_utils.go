@@ -7,8 +7,6 @@ import (
 	"net"
 	"net/url"
 	"strings"
-
-	_ "github.com/denisenkom/go-mssqldb" // register the MS-SQL driver
 )
 
 // PingDB is a wrapper around sql.DB.PingContext() that terminates as soon as the context is closed.
@@ -56,10 +54,9 @@ func splitConnectionStringURL(dsn string) (map[string]string, error) {
 		host = u.Host
 	}
 
+	res["server"] = host
 	if len(u.Path) > 0 {
-		res["server"] = host + "\\" + u.Path[1:]
-	} else {
-		res["server"] = host
+		res["instance"] = u.Path[1:]
 	}
 
 	if len(port) > 0 {
@@ -112,4 +109,102 @@ func splitRawConnectionStringDSN(dsn string) (map[string]string, error) {
 	}
 
 	return res, nil
+}
+
+// extract key from symbol table returning a value cast to desired type
+func GetMapValueString(symtab map[string]any, key string) string {
+	var value string
+	if value_raw, ok := symtab[key]; ok {
+		switch value_val := value_raw.(type) {
+		case string:
+			value = value_val
+		case int:
+			value = fmt.Sprintf("%d", value_val)
+		default:
+			value = ""
+		}
+	}
+	return value
+}
+
+// generate DSN string from parameter map
+func GenDSN(params map[string]string) string {
+
+	new_dns := new(strings.Builder)
+	// Hostname
+	new_dns.WriteString("HOSTNAME=")
+	new_dns.WriteString(params["server"])
+	new_dns.WriteString("; ")
+
+	// Port
+	if params["port"] != "" {
+		new_dns.WriteString("PORT=")
+		new_dns.WriteString(params["port"])
+		new_dns.WriteString("; ")
+	}
+
+	// Database
+	new_dns.WriteString("DATABASE=")
+	new_dns.WriteString(params["database"])
+	new_dns.WriteString("; ")
+
+	// Protocol
+	if params["protocol"] != "" {
+		new_dns.WriteString("PROTOCOL=")
+		new_dns.WriteString(params["protocol"])
+		new_dns.WriteString("; ")
+	}
+
+	// user
+	new_dns.WriteString("UID=")
+	new_dns.WriteString(params["user id"])
+	new_dns.WriteString("; ")
+
+	// password
+	new_dns.WriteString("PWD=")
+	new_dns.WriteString(params["password"])
+	new_dns.WriteString("; ")
+
+	return new_dns.String()
+}
+
+// generate DSN string in url format from parameters map
+func GenDSNUrl(driver string, params map[string]string) string {
+
+	new_dns := new(strings.Builder)
+
+	new_dns.WriteString(driver)
+	new_dns.WriteString("://")
+
+	// Hostname
+	new_dns.WriteString(params["server"])
+
+	// Port
+	if params["port"] != "" {
+		new_dns.WriteString(":")
+		new_dns.WriteString(params["port"])
+	}
+	// instance
+	if params["instance"] != "" {
+		new_dns.WriteString("/")
+		new_dns.WriteString(params["instance"])
+	}
+
+	param_idx := 0
+	for key, val := range params {
+		if key == "server" || key == "port" {
+			continue
+		}
+		if param_idx == 0 {
+			new_dns.WriteString("?")
+		} else {
+			new_dns.WriteString("&")
+		}
+		new_dns.WriteString(url.QueryEscape(key))
+		new_dns.WriteString("=")
+		new_dns.WriteString(url.QueryEscape(val))
+		param_idx++
+	}
+
+	return new_dns.String()
 }

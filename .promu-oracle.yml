@@ -1,21 +1,24 @@
 go:
-    cgo: false
+    cgo: true
 repository:
-    # path: github.com/peekjef72/db2_exporter
-    path: .
+    path: github.com/peekjef72/sql_exporter
 build:
+    static: false
     binaries:
         - name: oracle_exporter
           path: .
-    flags: -tags netgo,usergo,static,oracle
-    # -gcflags -I/opt/db2_exporter/lib/clidriver/include
-        # -I /usr/include/oracle/19.16/client64
-        # -L /usr/lib/oracle/19.16/client64/lib
+    flags: |
+        -tags netgo,usergo,oracle
+
+    #-gcflags -I/usr/include/oracle/19.16/client64
+    # -I /usr/include/oracle/19.16/client64
+    # -L /usr/lib/oracle/19.16/client64/lib
     ldflags: |
+        -L /usr/lib/oracle/19.23/client64/lib
         -X github.com/prometheus/common/version.Version={{.Version}}
         -X github.com/prometheus/common/version.Revision={{.Revision}}
         -X github.com/prometheus/common/version.Branch={{.Branch}}
-        -X github.com/prometheus/common/version.BuildDate={{date "2006/01/02-15:04:05"}}
+        -X github.com/prometheus/common/version.BuildDate={{date "2006-01-02T15:04:05"}}
         -X github.com/prometheus/common/version.BuildUser={{user}}@{{host}}
     # static: false
 tarball:
@@ -23,6 +26,4 @@ tarball:
     files:
       - LICENSE
       - README.md
-      - examples/oracle_exporter.yml
-      - examples/oracle_standard.collector.yml
-      - examples/targets
+      - config

@@ -16,11 +16,11 @@ import (
 	"github.com/prometheus/common/promlog"
 )
 
+var dsnOverride = kingpin.Flag("config.data-source-name", "Data source name to override the value in the configuration file with.").String()
+
 var (
 	ErrTargetNotFound = fmt.Errorf("target not found")
 )
-
-var dsnOverride = kingpin.Flag("config.data-source-name", "Data source name to override the value in the configuration file with.").String()
 
 // Exporter is a prometheus.Gatherer that gathers SQL metrics from targets and merges them with the default registry.
 type Exporter interface {
@@ -85,7 +85,8 @@ func NewExporter(configFile string, logger log.Logger, collectorName string) (Ex
 		if len(t.TargetsFiles) > 0 {
 			continue
 		}
-		target, err := NewTarget(logContext, t, t.Collectors(), nil, c.Globals, logger)
+		target, err := NewTarget(logContext, t,
+			t.Collectors(), nil, c.Globals, logger)
 		if err != nil {
 			return nil, err
 		}
@@ -222,7 +223,9 @@ func (e *exporter) FindTarget(tname string) (Target, error) {
 func (e *exporter) AddTarget(tg_config *TargetConfig) (Target, error) {
 	var logContext []interface{}
 
-	target, err := NewTarget(logContext, tg_config, tg_config.Collectors(), nil, e.config.Globals, e.logger)
+	target, err := NewTarget(logContext,
+		tg_config, tg_config.Collectors(), nil,
+		e.config.Globals, e.logger)
 	if err != nil {
 		return nil, err
 	}

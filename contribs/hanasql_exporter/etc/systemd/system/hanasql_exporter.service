@@ -1,0 +1,23 @@
+[Unit]
+Description=HANASQL Exporter : Prometheus agent to collect SAP HANA metrics
+Wants=network-online.target
+After=network-online.target
+StartLimitBurst=3
+StartLimitIntervalSec=150
+
+[Service]
+User=hana_exporter
+Group=hana_exporter
+WorkingDirectory=/opt/hanasql_exporter
+Restart=always
+RestartSec=2
+Type=simple
+ExecStart=/opt/hanasql_exporter/hanasql_exporter \
+        --log.level=error \
+        --config.file=/etc/hanasql_exporter/hanasql_exporter.yml \
+        --web.listen-address=:9658
+
+ExecReload=/bin/kill -HUP $MAINPID
+
+[Install]
+WantedBy=multi-user.target

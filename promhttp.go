@@ -12,6 +12,8 @@ import (
 	"sync"
 	"time"
 
+	// "github.com/peekjef72/db2_exporter"
+
 	"github.com/go-kit/log/level"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/expfmt"
@@ -34,7 +36,6 @@ func ExporterHandlerFor(exporter Exporter) http.Handler {
 		)
 
 		params := req.URL.Query()
-
 		tname := params.Get("target")
 		if tname == "" {
 			err := fmt.Errorf("Target parameter is missing")
@@ -77,10 +78,8 @@ func ExporterHandlerFor(exporter Exporter) http.Handler {
 			auth := exporter.Config().FindAuthConfig(auth_name)
 			if auth != nil {
 				target.Config().AuthConfig = *auth
-				target.SetSymbol("auth_mode", auth.Mode)
 				target.SetSymbol("user", auth.Username)
 				target.SetSymbol("password", string(auth.Password))
-				target.SetSymbol("auth_token", string(auth.Token))
 				target.Config().AuthName = auth_name
 			}
 		}
@@ -89,9 +88,10 @@ func ExporterHandlerFor(exporter Exporter) http.Handler {
 		if auth_key != "" {
 			target.SetSymbol("auth_key", auth_key)
 		}
-
-		ctx, cancel := contextFor(req, exporter)
-		defer cancel()
+		ctx, cancel := contextFor(req, exporter, target)
+		defer func() {
+			cancel()
+		}()
 
 		// Go through prometheus.Gatherers to sanitize and sort metrics.
 		gatherer := prometheus.Gatherers{exporter.WithContext(ctx, target)}
@@ -133,9 +133,9 @@ func ExporterHandlerFor(exporter Exporter) http.Handler {
 	})
 }
 
-func contextFor(req *http.Request, exporter Exporter) (context.Context, context.CancelFunc) {
+func contextFor(req *http.Request, exporter Exporter, target Target) (context.Context, context.CancelFunc) {
 	timeout := time.Duration(0)
-	configTimeout := time.Duration(exporter.Config().Globals.ScrapeTimeout)
+	configTimeout := time.Duration(target.Config().ScrapeTimeout)
 	// If a timeout is provided in the Prometheus header, use it.
 	if v := req.Header.Get("X-Prometheus-Scrape-Timeout-Seconds"); v != "" {
 		timeoutSeconds, err := strconv.ParseFloat(v, 64)
@@ -163,7 +163,10 @@ func contextFor(req *http.Request, exporter Exporter) (context.Context, context.
 	if timeout <= 0 {
 		return context.Background(), func() {}
 	}
+	level.Debug(exporter.Logger()).Log("msg", fmt.Sprintf("launching exporter.Gather() with timeout `%s`", timeout))
+
 	return context.WithTimeout(context.Background(), timeout)
+	// return context.WithTimeout(context.Background(), timeout)
 }
 
 var bufPool sync.Pool

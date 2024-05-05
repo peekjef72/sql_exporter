@@ -1,4 +1,4 @@
-//go:build !db2 && !mssql && oracle
+//go:build !db2 && !hana && !mssql && oracle
 
 package main
 
@@ -12,6 +12,7 @@ import (
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	_ "github.com/mattn/go-oci8"
+	"github.com/peekjef72/httpapi_exporter/encrypt"
 	// register the Oracle OCI-8 driver
 )
 
@@ -20,36 +21,13 @@ import (
 // context is closed (this is actually prevented by `database/sql` implementation), sets connection limits and returns
 // the handle.
 //
-// Below is the list of supported databases (with built in drivers) and their DSN formats. Unfortunately there is no
-// dynamic way of loading a third party driver library (as e.g. with Java classpaths), so any driver additions require
-// a binary rebuild.
-//
-// MySQL
-//
-// Using the https://github.com/go-sql-driver/mysql driver, DSN format (passed to the driver stripped of the `mysql://`
-// prefix):
-//   mysql://username:password@protocol(host:port)/dbname?param=value
-//
-// PostgreSQL
-//
-// Using the https://godoc.org/github.com/lib/pq driver, DSN format (passed through to the driver unchanged):
-//   postgres://username:password@host:port/dbname?param=value
-//
-// MS SQL Server
-//
-// Using the https://github.com/denisenkom/go-mssqldb driver, DSN format (passed through to the driver unchanged):
-//   sqlserver://username:password@host:port/instance?param=value
-//
-// Clickhouse
-//
-// Using the https://github.com/kshvakov/clickhouse driver, DSN format (passed to the driver with the`clickhouse://`
-// prefix replaced with `tcp://`):
-//   clickhouse://host:port?username=username&password=password&database=dbname&param=value
+
 func OpenConnection(
 	ctx context.Context,
 	logContext []interface{},
 	logger log.Logger,
 	dsn string,
+	auth AuthConfig,
 	maxConns, maxIdleConns int,
 	symbol_table map[string]interface{}) (*sql.DB, error) {
 	var driver string
@@ -69,7 +47,7 @@ func OpenConnection(
 	case "oracle", "oci8":
 		var err error
 		if strings.HasPrefix(dsn, "oracle://") || strings.HasPrefix(dsn, "oci8://") {
-			// "oracle://<hostname>:<port>?user%20id=<login>&password=<password>&database=<database>&protocol=..."
+			// "oracle://<hostname>:<port>/<database>?user%20id=<login>&password=<password>&database=<database>&protocol=..."
 			params, err = splitConnectionStringURL(dsn)
 			if err != nil {
 				return nil, err
@@ -90,20 +68,58 @@ func OpenConnection(
 		if !ok || val == "" {
 			return nil, fmt.Errorf("server can't be empty")
 		}
-		val, ok = params["user id"]
-		if !ok || val == "" {
-			return nil, fmt.Errorf("user Id can't be empty")
+
+		if auth.Username != "" {
+			params["user id"] = auth.Username
+		} else {
+			val, ok = params["user id"]
+			if !ok || val == "" {
+				return nil, fmt.Errorf("user Id can't be empty")
+			}
 		}
-		_, ok = params["password"]
-		if !ok {
-			return nil, fmt.Errorf("password has to be set")
+
+		if auth.Password != "" {
+			passwd := string(auth.Password)
+			if strings.HasPrefix(passwd, "/encrypted/") {
+				ciphertext := passwd[len("/encrypted/"):]
+				level.Debug(logger).Log(
+					"module", "sql::OpenConnection()",
+					"ciphertext", ciphertext)
+				auth_key := GetMapValueString(symbol_table, "auth_key")
+				level.Debug(logger).Log(
+					"module", "sql::OpenConnection()",
+					"auth_key", auth_key)
+				if auth_key == "" {
+					return nil, fmt.Errorf("password is encrypt and not ciphertext provided (auth_key)")
+				}
+				cipher, err := encrypt.NewAESCipher(auth_key)
+				if err != nil {
+					err := fmt.Errorf("can't obtain cipher to decrypt")
+					// level.Error(c.logger).Log("errmsg", err)
+					return nil, err
+				}
+				passwd, err = cipher.Decrypt(ciphertext, true)
+				if err != nil {
+					err := fmt.Errorf("invalid key provided to decrypt")
+					// level.Error(c.logger).Log("errmsg", err)
+					return nil, err
+				}
+				params["password"] = passwd
+			}
+
+		} else {
+			_, ok = params["password"]
+			if !ok {
+				return nil, fmt.Errorf("password has to be set")
+			}
 		}
-		server, sid := my_split(params["server"], "\\")
-		params["server"] = server
-		params["service name"] = sid
-		val, ok = params["service name"]
+
+		val, ok = params["instance"]
 		if !ok || val == "" {
 			return nil, fmt.Errorf("database must be set")
+		} else {
+			params["service name"] = params["instance"]
+			delete(params, "instance")
 		}
 
 		// oci8.ParseDSN

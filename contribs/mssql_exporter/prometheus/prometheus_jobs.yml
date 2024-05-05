@@ -1,0 +1,16 @@
+#--------- Start prometheus mssql exporter  ---------#
+  - job_name: "mssql"
+    metrics_path: /metrics
+    file_sd_configs:
+      - files: [ "/etc/prometheus/mssql_nodes/*.yml" ]
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      # use the value set in __tmp_exporter_host as exporter host name
+      - source_labels: [__tmp_exporter_host]
+        target_label: __address__
+      # or directly:
+      # - target_label: __address__
+      #   replacement: "mssql_exporter_host.domain.name:9401"  # The mssql_exporter's real hostname.
+
+#--------- End prometheus mssql exporter ---------#

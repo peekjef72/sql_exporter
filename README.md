@@ -1,22 +1,115 @@
-# Prometheus MSSQL Exporter [![Build Status](https://travis-ci.org/free/sql_exporter.svg)](https://travis-ci.org/free/sql_exporter) [![Go Report Card](https://goreportcard.com/badge/github.com/free/sql_exporter)](https://goreportcard.com/report/github.com/free/sql_exporter) [![GoDoc](https://godoc.org/github.com/free/sql_exporter?status.svg)](https://godoc.org/github.com/free/sql_exporter)
+# Prometheus SQL Exporter 
+Exporter for [Prometheus](https://prometheus.io) that can collect multiple type of sql servers.
 
-Database MSSQL exporter for [Prometheus](https://prometheus.io).
+As examples 4 configurations for exporters are provided (see contribs):
+ * [mssql](contribs/mssql_exporter/)
+ * [db2](contribs/db2_exporter/)
+ * [oracle](contribs/oracle_exporter/)
+ * [hana](contribs/hanasql_exporter/)
 
 ## Overview
 
-![overview](snapshots/snapshot_mssql_dashboard_general.PNG)
-MSSQL Exporter is a configuration driven exporter that exposes metrics gathered from MSSQL Servers, for use by the Prometheus monitoring system. Out of the box, it provides support for Microsoft SQL Server, but
-any DBMS for which a Go driver is available may be monitored after rebuilding the binary with the DBMS driver included.
+<figure>
+    <img src="contribs/mssql_exporter/screenshots/mssql_dashboard_general.PNG" alt="overview MSSQL">
+    <figcaption style="font-style: italic; text-align: center;">MSSQL dashboard overview</figcaption>
+</figure>
 
-The exporter is multi targets, meaning that you can set several target servers configuration identified each by name, then Prometheus can scratch these targets by adding the parameter target into the url.
+SQL Exporter is a configuration driven exporter that exposes metrics gathered from MSSQL Servers, for use by the Prometheus monitoring system. Out of the box, it provides support for Microsoft SQL Server, IBM DB2, HANADB but any DBMS for which a Go driver is available may be monitored after rebuilding the binary with the DBMS driver included.
 
-The collected metrics and the queries that produce them are entirely configuration defined. SQL queries are grouped into
+The exporter is multi targets, meaning that you can set several target servers configuration identified each by name, then Prometheus can scratch these targets by adding the parameter target into the url. It can also works with a default target configuration and authentication models 
+
+The collected metrics and the queries that produce them are entirely configuration defined. **No SQL query are hard coded inside the exporter**. SQL queries are grouped into
 collectors -- logical groups of queries, e.g. *query stats* or *I/O stats*, mapped to the metrics they populate.
-Collectors may be DBMS-specific (e.g. *MySQL InnoDB stats*) or custom, deployment specific (e.g. *pricing data
-freshness*). This means you can quickly and easily set up custom collectors to measure data quality, whatever that might mean in your specific case.
+This means you can quickly and easily set up custom collectors to measure data quality, whatever that might mean in your specific case.
 
 Per the Prometheus philosophy, scrapes are synchronous (metrics are collected on every `/metrics` poll) but, in order to keep load at reasonable levels, minimum collection intervals may optionally be set per collector, producing cached
 metrics when queried more frequently than the configured interval.
+
+## building
+
+### msuql or hanasql
+mssql_exporter and hanasql_exporter can be compiled staticaly.
+```bash
+make build-mssql build-hana
+```
+
+### db2
+
+db2_exporter can't be compiled staticaly.
+ctdriver must be installed first for compilation and for **usage**.
+see [go_ibm_db/INSTALL.md](https://github.com/ibmdb/go_ibm_db/blob/master/INSTALL.md)
+
+Here a small summary for linux:
+* download the cli :
+  ```bash
+  mkdir $HOME/db2
+  cd $HOME/db2
+  curl --output linuxx64_odbc_cli.tar.gz https://public.dhe.ibm.com/ibmdl/export/pub/software/data/db2/drivers/odbc_cli/linuxx64_odbc_cli.tar.gz
+  tar xzf linuxx64_odbc_cli.tar.gz
+  export IBM_DB_HOME=/home/<user>/db2/clidriver
+  export CGO_CFLAGS=-I$IBM_DB_HOME/include
+  export CGO_LDFLAGS=-L$IBM_DB_HOME/lib
+  export LD_LIBRARY_PATH=$IBM_DB_HOME/lib:$LD_LIBRARY_PATH
+  ```
+  If you have root access you can set path to DB2 dynamic library via ld.so.conf:
+
+  ```bash
+  vi /etc/ld.so.conf.d/db2_odbc.conf
+  ```
+
+  ```text
+  /home/jfpik/db2/clidriver/lib
+  ```
+
+  ```bash
+  ldconfig
+  ```
+  if you plan to recompile db2_exporter several times, you can build an env file:
+
+  ```bash
+  vi .env_db2
+  ```
+
+  ```text
+  export IBM_DB_HOME=/home/jfpi<user>k/db2/clidriver
+  export CGO_CFLAGS="-I $IBM_DB_HOME/include"
+  export CGO_LDFLAGS="-L $IBM_DB_HOME/lib"
+  export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$IBM_DB_HOME/lib
+
+  GO111MODULE=on
+  GOSUMDB=off
+  GOFLAGS="-tags=db2"
+  ```
+
+  Then use this file:
+
+    ```bash
+    . .env_db2
+    make build-db2
+    ```
+
+for others urls check [setup.go](https://github.com/ibmdb/go_ibm_db/blob/master/installer/setup.go)
+
+### OracleDB
+
+oracledb_exporter can't be compiled staticaly too. Oracle Instant client must be installed first on system.
+Download and install an oracle instant client: recommanded on linux oracle-instantclient19.23-basiclite-19.23.0.0.0 (oracle-instantclient19.6-basiclite-19.6.0.0.0-1.x86_64.rpm
+ and oracle-instantclient19.23-devel-19.23.0.0.0-1.x86_64.rpm)
+
+```
+curl --output ~/Downloads/oracle-instantclient19.23-basic-19.23.0.0.0-1.x86_64.rpm https://yum.oracle.com/repo/OracleLinux/OL8/oracle/instantclient/x86_64/getPackage/oracle-instantclient19.23-basic-19.23.0.0.0-1.x86_64.rpm
+curl --output ~/Downloads/oracle-instantclient19.23-devel-19.23.0.0.0-1.x86_64.rpm https://yum.oracle.com/repo/OracleLinux/OL8/oracle/instantclient/x86_64/getPackage/oracle-instantclient19.23-devel-19.23.0.0.0-1.x86_64.rpm
+```
+
+then install the download package, and update library path
+```bash
+dnf install file:///home/jfpik/Downloads/oracle-instantclient19.23-basic-19.23.0.0.0-1.x86_64.rpm 
+dnf install file:///home/jfpik/Downloads/oracle-instantclient19.23-devel-19.23.0.0.0-1.x86_64.rpm
+
+ldconfig
+```
+
+check oci8.pc and .promu-oracle.yml file to adapt version or path with installed rpm.
 
 ## Usage
 

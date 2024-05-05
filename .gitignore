@@ -16,10 +16,6 @@
 *.code-workspace
 .vscode/
 
-.env
-/config/
 
-/mssql_exporter
-/db2_exporter
-/oracle_exporter
-/postgres_exporter
+local_config/
+

@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	docsUrl   = "https://github.com/peekjef72/mssql_exporter#readme"
+	docsUrl   = "https://github.com/peekjef72/sql_exporter#readme"
 	templates = `
     {{ define "page" -}}
       <html>
@@ -35,7 +35,7 @@ const (
 		  th { border: 1px solid #edd2e6; padding: 0.3rem; }
 		  td { border: 1px solid #edd2e6; padding: 0.3rem; }
 		  .odd { background-color: rgba(0,0,0,.05); }
-        </style>
+</style>
       </head>
       <body>
         <div class="navbar">
@@ -45,8 +45,8 @@ const (
           <div><a href="/config">Configuration</a></div>
           <div><a href="/targets">Targets</a></div>
           <div><a href="/status">Status</a></div>
-          <div><a href="/debug/pprof">Profiling</a></div>
           <div><a href="/sql_exporter_metrics">Exporter Metrics</a></div>
+          <div><a href="/debug/pprof">Profiling</a></div>
           <div><a href="{{ .DocsUrl }}">Help</a></div>
         </div>
         {{template "content" .}}
@@ -125,7 +125,6 @@ type versionInfo struct {
 	StartTime  string
 	ReloadTime string
 }
-
 type tdata struct {
 	ExporterName string
 	MetricsPath  string
@@ -139,7 +138,6 @@ type tdata struct {
 
 	// status
 	Version versionInfo
-
 	// `/error` only
 	Err error
 }
@@ -186,7 +184,7 @@ func ConfigHandlerFunc(metricsPath string, exporter Exporter) func(http.Response
 	}
 }
 
-// ConfigHandlerFunc is the HTTP handler for the `/config` page. It outputs the configuration marshaled in YAML format.
+// StatusHandlerFunc is the HTTP handler for the `/status` page. It outputs the status of exporter.
 func StatusHandlerFunc(metricsPath string, exporter Exporter) func(http.ResponseWriter, *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
 

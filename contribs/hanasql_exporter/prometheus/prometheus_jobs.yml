@@ -1,0 +1,16 @@
+#--------- Start prometheus hanasql exporter  ---------#
+  - job_name: "hanasql"
+    metrics_path: /metrics
+    file_sd_configs:
+      - files: [ "/etc/prometheus/hanasql_nodes/*.yml" ]
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      # use the value set in __tmp_source_host as exporter host name
+      - source_labels: [__tmp_exporter_host]
+        target_label: __address__
+      # or directly:
+      # - target_label: __address__
+      #   replacement: "hanasql_exporter_host.domain.name:9658"  # The hanasql exporter's real hostname.
+
+#--------- End prometheus hanasql exporter ---------#

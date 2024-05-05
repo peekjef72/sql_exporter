@@ -134,18 +134,15 @@ func (q *Query) Collect(
 	ctx context.Context,
 	conn *sql.DB,
 	symbols_table map[string]interface{},
-	met_ch chan<- Metric,
-	coll_ch chan<- int) {
+	ch chan<- Metric) {
 	if ctx.Err() != nil {
-		met_ch <- NewInvalidMetric(q.logContext, ctx.Err())
-		coll_ch <- 0
+		ch <- NewInvalidMetric(q.logContext, ctx.Err())
 		return
 	}
 	rows, err := q.run(ctx, conn, symbols_table)
 	if err != nil {
 		// TODO: increment an error counter
-		met_ch <- NewInvalidMetric(q.logContext, err)
-		coll_ch <- 0
+		ch <- NewInvalidMetric(q.logContext, err)
 		return
 	}
 
@@ -156,24 +153,21 @@ func (q *Query) Collect(
 	dest, err := q.scanDest(rows)
 	if err != nil {
 		// TODO: increment an error counter
-		met_ch <- NewInvalidMetric(q.logContext, err)
-		coll_ch <- 0
+		ch <- NewInvalidMetric(q.logContext, err)
 		return
 	}
 	for rows.Next() {
 		row, err := q.scanRow(rows, dest)
 		if err != nil {
-			met_ch <- NewInvalidMetric(q.logContext, err)
-			coll_ch <- 0
+			ch <- NewInvalidMetric(q.logContext, err)
 			continue
 		}
 		for _, mf := range q.metricFamilies {
-			mf.Collect(row, met_ch, coll_ch)
+			mf.Collect(row, ch)
 		}
 	}
 	if err1 := rows.Err(); err1 != nil {
-		met_ch <- NewInvalidMetric(q.logContext, err1)
-		coll_ch <- 0
+		ch <- NewInvalidMetric(q.logContext, err1)
 	}
 }
 
@@ -214,6 +208,7 @@ func (q *Query) run(
 		if err != nil {
 			var logCtxt []interface{}
 			logCtxt = append(logCtxt, q.logContext...)
+			logCtxt = append(logCtxt, "query", query)
 			logCtxt = append(logCtxt, "msg", "prepare query failed")
 			return nil, ErrorWrap(logCtxt, err)
 		}
@@ -247,9 +242,14 @@ func (q *Query) scanDest(rows *sql.Rows) ([]interface{}, error) {
 		column = strings.ToLower(column)
 
 		if len(fieldType) > 0 {
-			if fieldType[i].DatabaseTypeName() == "SQL_VARIANT" {
+			switch fieldType[i].DatabaseTypeName() {
+			case "SQL_VARIANT", "VARCHAR", "NVARCHAR":
 				q.fieldTypes[column] = fieldTypeString
-			} else {
+			case "INTEGER", "SIZE", "BIGINT":
+				q.fieldTypes[column] = fieldTypeNumber
+			case "LONGDATE":
+				q.fieldTypes[column] = fieldTypeTime
+			default:
 				st := fieldType[i].ScanType()
 				if st != nil {
 					switch st.Kind() {
@@ -257,11 +257,29 @@ func (q *Query) scanDest(rows *sql.Rows) ([]interface{}, error) {
 						q.fieldTypes[column] = fieldTypeString
 					case reflect.ValueOf(time.Time{}).Kind():
 						q.fieldTypes[column] = fieldTypeTime
+						level.Debug(q.logger).Log("queryname", q.config.Name, "columnType", fieldType[i].DatabaseTypeName())
 					default:
 						q.fieldTypes[column] = fieldTypeNumber
 					}
 				}
 			}
+			// if fieldType[i].DatabaseTypeName() == "SQL_VARIANT" {
+			// 	q.fieldTypes[column] = fieldTypeString
+			// } else if fieldType[i].DatabaseTypeName() == "INTEGER" {
+			// 	q.fieldTypes[column] = fieldTypeNumber
+			// } else {
+			// 	st := fieldType[i].ScanType()
+			// 	if st != nil {
+			// 		switch st.Kind() {
+			// 		case reflect.String:
+			// 			q.fieldTypes[column] = fieldTypeString
+			// 		case reflect.ValueOf(time.Time{}).Kind():
+			// 			q.fieldTypes[column] = fieldTypeTime
+			// 		default:
+			// 			q.fieldTypes[column] = fieldTypeNumber
+			// 		}
+			// 	}
+			// }
 		}
 
 		switch q.columnTypes[column] {

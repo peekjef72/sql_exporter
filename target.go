@@ -4,13 +4,13 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
-	"fmt"
+	"reflect"
 	"sort"
 	"sync"
 	"time"
 
 	"github.com/go-kit/log"
-	"github.com/go-kit/log/level"
+	"github.com/imdario/mergo"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 	"google.golang.org/protobuf/proto"
@@ -24,7 +24,7 @@ const (
 	scrapeDurationName  = "scrape_duration_seconds"
 	scrapeDurationHelp  = "How long it took to scrape the target in seconds"
 	collectorStatusName = "collector_status"
-	collectorStatusHelp = "collector scripts status 0: error - 1: ok"
+	collectorStatusHelp = "collector scripts status 0: error - 1: ok - 2: Invalid login 3: Timeout"
 )
 
 // Target collects SQL metrics from a single sql.DB instance. It aggregates one or more Collectors and it looks much
@@ -32,35 +32,34 @@ const (
 type Target interface {
 	// Collect is the equivalent of prometheus.Collector.Collect(), but takes a context to run in.
 	Collect(ctx context.Context, ch chan<- Metric)
-	Config() *TargetConfig
-	GetDeadline() time.Time
 	Name() string
-	SetDeadline(time.Time)
-	SetLogger(log.Logger)
+	Config() *TargetConfig
 	SetSymbol(string, any) error
+	GetSymbolTable() map[string]any
+	SetLogger(log.Logger)
+	Lock()
+	Unlock()
 }
 
 // target implements Target. It wraps a sql.DB, which is initially nil but never changes once instantianted.
 type target struct {
-	name string
+	// name                string
+	config *TargetConfig
 	// dsn                 string
-	config              *TargetConfig
-	collectors          []Collector
-	constLabels         prometheus.Labels
+	collectors []Collector
+	// constLabels         prometheus.Labels
 	globalConfig        *GlobalConfig
 	upDesc              MetricDesc
 	scrapeDurationDesc  MetricDesc
 	collectorStatusDesc MetricDesc
 	logContext          []interface{}
 
-	conn     *sql.DB
-	logger   log.Logger
-	deadline time.Time
+	conn          *sql.DB
+	logger        log.Logger
+	symbols_table map[string]interface{}
 
 	// to protect the data during exchange
 	content_mutex *sync.Mutex
-
-	symtab map[string]interface{}
 }
 
 // NewTarget returns a new Target with the given instance name, data source name, collectors and constant labels.
@@ -77,7 +76,7 @@ func NewTarget(
 		logContext = append(logContext, "target", tpar.Name)
 	}
 
-	constLabelPairs := make([]*dto.LabelPair, 0, len(constLabels))
+	constLabelPairs := make([]*dto.LabelPair, 0, len(tpar.Labels))
 	for n, v := range constLabels {
 		constLabelPairs = append(constLabelPairs, &dto.LabelPair{
 			Name:  proto.String(n),
@@ -95,16 +94,9 @@ func NewTarget(
 		collectors = append(collectors, c)
 	}
 	upMetricName := gc.NameSpace + "_up"
-	upDesc := NewAutomaticMetricDesc(logContext,
-		upMetricName,
-		upMetricHelp,
-		prometheus.GaugeValue,
-		constLabelPairs)
-	scrapeDurationDesc := NewAutomaticMetricDesc(logContext,
-		gc.NameSpace+"_"+scrapeDurationName,
-		scrapeDurationHelp,
-		prometheus.GaugeValue,
-		constLabelPairs)
+	upDesc := NewAutomaticMetricDesc(logContext, upMetricName, upMetricHelp, prometheus.GaugeValue, constLabelPairs)
+	scrapeDurationDesc :=
+		NewAutomaticMetricDesc(logContext, scrapeDurationName, scrapeDurationHelp, prometheus.GaugeValue, constLabelPairs)
 
 	collectorStatusDesc := NewAutomaticMetricDesc(logContext,
 		gc.NameSpace+"_"+collectorStatusName,
@@ -115,19 +107,82 @@ func NewTarget(
 	symbols_table := make(map[string]interface{}, 2)
 
 	t := target{
-		name:                tpar.Name,
-		config:              tpar,
+		config: tpar,
+		// name:                tpar.Name,
+		// dsn:                 string(tpar.DSN),
 		collectors:          collectors,
-		constLabels:         constLabels,
 		globalConfig:        gc,
 		upDesc:              upDesc,
 		scrapeDurationDesc:  scrapeDurationDesc,
 		collectorStatusDesc: collectorStatusDesc,
 		logContext:          logContext,
 		logger:              logger,
-		symtab:              symbols_table,
+		symbols_table:       symbols_table,
+		content_mutex:       &sync.Mutex{},
 	}
 	return &t, nil
+}
+
+// Name implement Target.Name
+// to obtain target name from interface
+func (t *target) Name() string {
+	return t.config.Name
+}
+
+// Config implement Target.Name for target
+// to obtain target name from interface
+func (t *target) Config() *TargetConfig {
+	return t.config
+}
+
+// SetSymbol implement Target.SetSymbol
+//
+// add or update element in symbol table
+//
+// May be unitary key (.attribute) or sequence (.attr1.attr2.[...])
+func (t *target) SetSymbol(key string, value any) error {
+	symtab := t.symbols_table
+	if r_val, ok := symtab[key]; ok {
+		vDst := reflect.ValueOf(r_val)
+		if vDst.Kind() == reflect.Map {
+			if m_val, ok := r_val.(map[string]any); ok {
+				opts := mergo.WithOverride
+				if err := mergo.Merge(&m_val, value, opts); err != nil {
+					return err
+				}
+			}
+		} else if vDst.Kind() == reflect.Slice {
+			if s_val, ok := r_val.([]any); ok {
+				opts := mergo.WithOverride
+				if err := mergo.Merge(&s_val, value, opts); err != nil {
+					return err
+				}
+			}
+		} else {
+			symtab[key] = value
+		}
+	} else {
+		symtab[key] = value
+	}
+	return nil
+}
+
+func (t *target) GetSymbolTable() map[string]any {
+	return t.symbols_table
+}
+
+func (t *target) SetLogger(logger log.Logger) {
+	t.content_mutex.Lock()
+	t.logger = logger
+	t.content_mutex.Unlock()
+}
+
+func (t *target) Lock() {
+	t.content_mutex.Lock()
+}
+
+func (t *target) Unlock() {
+	t.content_mutex.Unlock()
 }
 
 // Collect implements Target.
@@ -142,63 +197,29 @@ func (t *target) Collect(ctx context.Context, ch chan<- Metric) {
 		ch <- NewInvalidMetric(t.logContext, err)
 		targetUp = false
 	}
-	if t.name != "" {
+	if t.config.Name != "" {
 		// Export the target's `up` metric as early as we know what it should be.
-		ch <- NewMetric(t.upDesc, boolToFloat64(targetUp), nil, nil)
+		ch <- NewMetric(t.upDesc, boolToFloat64(targetUp))
 	}
 
 	var wg sync.WaitGroup
 	// Don't bother with the collectors if target is down.
 	if targetUp {
 		wg.Add(len(t.collectors))
-		t.content_mutex.Lock()
-		logger := t.logger
-		t.content_mutex.Unlock()
-		level.Debug(logger).Log(
-			"collid", t.name,
-			"msg", fmt.Sprintf("target: send %d collector(s)", len(t.collectors)))
 		for _, c := range t.collectors {
-			t.content_mutex.Lock()
-			logger := t.logger
-			t.content_mutex.Unlock()
-			level.Debug(logger).Log(
-				"target", t.name,
-				"collid", c.GetId(),
-				"msg", "start collecting")
 			// If using a single DB connection, collectors will likely run sequentially anyway. But we might have more.
 			go func(collector Collector) {
 				defer wg.Done()
-				collector.Collect(ctx, t.conn, t.symtab, ch)
+				collector.Collect(ctx, t.conn, t.symbols_table, ch)
 			}(c)
 		}
 	}
 	// Wait for all collectors (if any) to complete.
 	wg.Wait()
 
-	t.content_mutex.Lock()
-	logger := t.logger
-	t.content_mutex.Unlock()
-	level.Debug(logger).Log("msg", "collectors have stopped")
-
-	if t.name != "" {
-		// And exporter a `collector execution status` metric for each collector once we're done scraping.
-		if targetUp {
-			t.content_mutex.Lock()
-			logger := t.logger
-			t.content_mutex.Unlock()
-			labels_name := make([]string, 1)
-			labels_name[0] = "collectorname"
-			labels_value := make([]string, 1)
-			for _, c := range t.collectors {
-				labels_value[0] = c.GetName()
-				level.Debug(logger).Log(
-					"collid", t.name,
-					"msg", fmt.Sprintf("target collector['%s'] collid=[%s] has status [%d]", labels_value[0], c.GetId(), c.GetStatus()))
-				ch <- NewMetric(t.collectorStatusDesc, float64(c.GetStatus()), labels_name, labels_value)
-			}
-		}
+	if t.config.Name != "" {
 		// And export a `scrape duration` metric once we're done scraping.
-		ch <- NewMetric(t.scrapeDurationDesc, float64(time.Since(scrapeStart))*1e-9, nil, nil)
+		ch <- NewMetric(t.scrapeDurationDesc, float64(time.Since(scrapeStart))*1e-9)
 	}
 }
 
@@ -207,9 +228,9 @@ func (t *target) ping(ctx context.Context) error {
 	// We cannot do this only once at creation time because the sql.Open() documentation says it "may" open an actual
 	// connection, so it "may" actually fail to open a handle to a DB that's initially down.
 	if t.conn == nil {
-		conn, err := OpenConnection(ctx, t)
-		// conn, err := OpenConnection(ctx, t.logContext, t.logger, string(t.config.DSN),
-		// 	t.globalConfig.MaxConns, t.globalConfig.MaxIdleConns, t.symtab)
+		conn, err := OpenConnection(ctx, t.logContext, t.logger, string(t.config.DSN),
+			t.config.AuthConfig,
+			t.globalConfig.MaxConns, t.globalConfig.MaxIdleConns, t.symbols_table)
 		if err != nil {
 			if err != ctx.Err() {
 				return ErrorWrap(t.logContext, err)
@@ -239,40 +260,6 @@ func (t *target) ping(ctx context.Context) error {
 		return ErrorWrap(t.logContext, ctx.Err())
 	}
 	return nil
-}
-
-// to obtain target name from interface
-func (t *target) Name() string {
-	return t.name
-}
-
-// Config implement Target.Name for target
-// to obtain target name from interface
-func (t *target) Config() *TargetConfig {
-	return t.config
-}
-
-// SetSymbol implement Target.SetSymbol
-func (t *target) SetSymbol(key string, value any) error {
-
-	t.symtab[key] = value
-	return nil
-}
-
-// Getter for deadline
-func (t *target) GetDeadline() time.Time {
-	return t.deadline
-}
-
-// Setter for deadline
-func (t *target) SetDeadline(tt time.Time) {
-	t.deadline = tt
-}
-
-func (t *target) SetLogger(logger log.Logger) {
-	t.content_mutex.Lock()
-	t.logger = logger
-	t.content_mutex.Unlock()
 }
 
 // boolToFloat64 converts a boolean flag to a float64 value (0.0 or 1.0).

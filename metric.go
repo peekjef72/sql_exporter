@@ -69,27 +69,22 @@ func NewMetricFamily(logContext []interface{}, mc *MetricConfig, constLabels []*
 }
 
 // Collect is the equivalent of prometheus.Collector.Collect() but takes a Query output map to populate values from.
-func (mf MetricFamily) Collect(row map[string]interface{}, met_ch chan<- Metric, coll_ch chan<- int) {
-
+func (mf MetricFamily) Collect(row map[string]interface{}, ch chan<- Metric) {
 	labelValues := make([]string, len(mf.labels))
-
 	for i, label := range mf.config.KeyLabels {
 		labelValues[i] = row[label].(string)
 	}
-	status := 1
 	for _, v := range mf.config.Values {
 		if mf.config.ValueLabel != "" {
 			labelValues[len(labelValues)-1] = v
 		}
 		if row[v] != nil {
 			value := row[v].(float64)
-			met_ch <- NewMetric(&mf, value, mf.labels, labelValues)
+			ch <- NewMetric(&mf, value, labelValues...)
 		} else {
-			status = 0
+			fmt.Println("error !!!!")
 		}
 	}
-	coll_ch <- status
-
 }
 
 // Name implements MetricDesc.
@@ -192,14 +187,14 @@ type Metric interface {
 // NewMetric returns a metric with one fixed value that cannot be changed.
 //
 // NewMetric panics if the length of labelValues is not consistent with desc.labels().
-func NewMetric(desc MetricDesc, value float64, labelNames []string, labelValues []string) Metric {
+func NewMetric(desc MetricDesc, value float64, labelValues ...string) Metric {
 	if len(desc.Labels()) != len(labelValues) {
 		panic(fmt.Sprintf("[%s] expected %d labels, got %d", desc.LogContext(), len(desc.Labels()), len(labelValues)))
 	}
 	return &constMetric{
 		desc:       desc,
 		val:        value,
-		labelPairs: makeLabelPairs(desc, labelNames, labelValues),
+		labelPairs: makeLabelPairs(desc, labelValues),
 	}
 }
 
@@ -232,8 +227,8 @@ func (m *constMetric) Write(out *dto.Metric) error {
 	return nil
 }
 
-func makeLabelPairs(desc MetricDesc, labelNames []string, labelValues []string) []*dto.LabelPair {
-	labels := labelNames
+func makeLabelPairs(desc MetricDesc, labelValues []string) []*dto.LabelPair {
+	labels := desc.Labels()
 	constLabels := desc.ConstLabels()
 
 	totalLen := len(labels) + len(constLabels)

@@ -14,7 +14,7 @@ import (
 	"github.com/go-kit/log/level"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/model"
-	"gopkg.in/yaml.v2"
+	"gopkg.in/yaml.v3"
 )
 
 // Load attempts to parse the given config file and return a Config object.
@@ -69,17 +69,21 @@ func (c *Config) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	if len(c.Targets) == 0 {
 		return fmt.Errorf("at least one target in `targets` must be defined")
 	}
-	if c.Globals.NameSpace != "" {
-		exporter_namespace = c.Globals.NameSpace
-	}
+	// if c.Globals.NameSpace != "" {
+	// 	exporter_namespace = c.Globals.NameSpace
+	// }
 	// Load any externally defined collectors.
 	if err := c.loadCollectorFiles(); err != nil {
 		return err
 	}
 
+	if len(c.Collectors) == 0 {
+		return fmt.Errorf("at least one collector in `collectors` must be defined")
+	}
+
 	// Populate collector references for the target/jobs.
 	colls := make(map[string]*CollectorConfig)
-	for id, coll := range c.Collectors {
+	for _, coll := range c.Collectors {
 		// Set the min interval to the global default if not explicitly set.
 		if coll.MinInterval < 0 {
 			coll.MinInterval = c.Globals.MinInterval
@@ -88,23 +92,109 @@ func (c *Config) UnmarshalYAML(unmarshal func(interface{}) error) error {
 			return fmt.Errorf("duplicate collector name: %s", coll.Name)
 		}
 		colls[coll.Name] = coll
-		coll.id = fmt.Sprintf("%02d", id)
+
+		// set metric prefix
+		var prefix string
+
+		// Set metric.query for all metrics: resolve query references (if any) and generate QueryConfigs for literal queries.
+		queries := make(map[string]*QueryConfig, len(coll.Queries))
+		for _, query := range coll.Queries {
+			queries[query.Name] = query
+		}
+		for _, metric := range coll.Metrics {
+			if coll.NameSpace != "" {
+				prefix = coll.NameSpace
+			} else if c.Globals.NameSpace != "" {
+				prefix = c.Globals.NameSpace
+			}
+
+			if !strings.HasPrefix(metric.Name, prefix) {
+				metric.Name = fmt.Sprintf("%s_%s", prefix, metric.Name)
+			}
+
+			if metric.QueryRef != "" {
+				query, found := queries[metric.QueryRef]
+				if !found {
+					return fmt.Errorf("unresolved query_ref %q in metric %q of collector %q", metric.QueryRef, metric.Name, coll.Name)
+				}
+				metric.query = query
+				query.metrics = append(query.metrics, metric)
+			} else {
+				// For literal queries generate a QueryConfig with a name based off collector and metric name.
+				metric.query = &QueryConfig{
+					Name:  metric.Name,
+					Query: metric.QueryLiteral,
+				}
+			}
+		}
 	}
+
+	// read the target config with a TargetsFiles specfied
 	for _, t := range c.Targets {
 		if len(t.TargetsFiles) > 0 {
 			err := c.loadTargetsFiles(t.TargetsFiles)
 			if err != nil {
 				return err
 			}
+		} else {
+			level.Info(c.logger).Log("msg", fmt.Sprintf("static target '%s' found", t.Name))
+		}
+	}
+	targets := c.Targets
+	c.Targets = nil
+	// remove pseudo targets with a TargetsFiles
+	for _, t := range targets {
+		if len(t.TargetsFiles) == 0 {
+			c.Targets = append(c.Targets, t)
 		}
 	}
 
+	// check if a target nammed "default" exists
+	// if not create one with default parameters from TargetConfig
+	found := false
 	for _, t := range c.Targets {
+		if strings.ToLower(t.Name) == "default" {
+			t.Name = "default"
+			found = true
+			break
+		}
+	}
+	if !found {
+		default_target := `
+name: default
+host: set_later
+collectors:
+  - ~.*_standard
+`
+		t := &TargetConfig{}
+		if err := yaml.Unmarshal([]byte(default_target), t); err != nil {
+			return err
+		}
+		c.Targets = append(c.Targets, t)
+		level.Info(c.logger).Log("msg", fmt.Sprintf("target '%s' added", t.Name))
+	}
+
+	for _, t := range c.Targets {
+		// substitute the collector names list set in config by the value forced in command line argument
+		if c.collectorName != "" {
+			t.CollectorRefs = nil
+			t.CollectorRefs = append(t.CollectorRefs, c.collectorName)
+		}
 		cs, err := resolveCollectorRefs(t.CollectorRefs, colls, fmt.Sprintf("target %q", t.Name))
 		if err != nil {
 			return err
 		}
 		t.collectors = cs
+
+		// substitute AuthConfig name with auth config parameters
+		if t.AuthName != "" {
+			auth := c.FindAuthConfig(t.AuthName)
+			if auth != nil {
+				t.AuthConfig = *auth
+			} else {
+				return fmt.Errorf("auth_name '%s' not found for target '%s", t.AuthName, t.Name)
+			}
+		}
 	}
 
 	// Check for empty/duplicate target names/data source names
@@ -126,14 +216,40 @@ func (c *Config) UnmarshalYAML(unmarshal func(interface{}) error) error {
 			return fmt.Errorf("duplicate data source definition %q in target %+v", t.Name, t)
 		}
 		dsns[string(t.DSN)] = nil
+
+		if t.ScrapeTimeout == 0 {
+			t.ScrapeTimeout = c.Globals.ScrapeTimeout
+		}
 	}
 
 	return checkOverflow(c.XXX, "config")
 }
 
+func (c *Config) FindAuthConfig(auth_name string) *AuthConfig {
+	var auth *AuthConfig
+	auth, found := c.AuthConfigs[auth_name]
+	if !found {
+		return nil
+	}
+	return auth
+}
+
+type dumpConfig struct {
+	Globals        *GlobalConfig          `yaml:"global"`
+	CollectorFiles []string               `yaml:"collector_files,omitempty"`
+	Collectors     []*CollectorConfig     `yaml:"collectors,omitempty"`
+	AuthConfigs    map[string]*AuthConfig `yaml:"auth_configs,omitempty"`
+}
+
 // YAML marshals the config into YAML format.
 func (c *Config) YAML() ([]byte, error) {
-	return yaml.Marshal(c)
+	dc := &dumpConfig{
+		Globals:        c.Globals,
+		AuthConfigs:    c.AuthConfigs,
+		CollectorFiles: c.CollectorFiles,
+		Collectors:     c.Collectors,
+	}
+	return yaml.Marshal(dc)
 }
 
 // loadCollectorFiles resolves all collector file globs to files and loads the collectors they define.
@@ -147,6 +263,7 @@ func (c *Config) loadCollectorFiles() error {
 
 		// Resolve the glob to actual filenames.
 		cfs, err := filepath.Glob(cfglob)
+		level.Debug(c.logger).Log("msg", fmt.Sprintf("Checking collectors from %s", cfglob))
 		if err != nil {
 			// The only error can be a bad pattern.
 			return fmt.Errorf("error resolving collector files for %s: %s", cfglob, err)
@@ -184,6 +301,7 @@ func (c *Config) loadTargetsFiles(targetFilepath []string) error {
 
 		// Resolve the glob to actual filenames.
 		tfs, err := filepath.Glob(tfglob)
+		level.Debug(c.logger).Log("msg", fmt.Sprintf("Checking targets from %s", tfglob))
 		if err != nil {
 			// The only error can be a bad pattern.
 			return fmt.Errorf("error resolving collector files for %s: %s", tfglob, err)
@@ -211,15 +329,6 @@ func (c *Config) loadTargetsFiles(targetFilepath []string) error {
 	return nil
 }
 
-func (c *Config) FindAuthConfig(auth_name string) *AuthConfig {
-	var auth *AuthConfig
-	auth, found := c.AuthConfigs[auth_name]
-	if !found {
-		return nil
-	}
-	return auth
-}
-
 // GlobalConfig contains globally applicable defaults.
 type GlobalConfig struct {
 	MinInterval   model.Duration `yaml:"min_interval"`          // minimum interval between query executions, default is 0
@@ -227,7 +336,7 @@ type GlobalConfig struct {
 	TimeoutOffset model.Duration `yaml:"scrape_timeout_offset"` // offset to subtract from timeout in seconds
 	MaxConns      int            `yaml:"max_connections"`       // maximum number of open connections to any one target
 	MaxIdleConns  int            `yaml:"max_idle_connections"`  // maximum number of idle connections to any one target
-	NameSpace     string         `yaml:"namespace"`             // prefix to add to all metric name (prefix + '_')
+	NameSpace     string         `yaml:"namespace"`             // prefix to add to all metric name (prifx + '_')
 	ExporterName  string         `yaml:"exporter_name,omitempty"`
 
 	// Catches all undefined fields and must be empty after parsing.
@@ -242,9 +351,9 @@ func (g *GlobalConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	g.ScrapeTimeout = model.Duration(10 * time.Second)
 	// Default to .5 seconds.
 	g.TimeoutOffset = model.Duration(500 * time.Millisecond)
+	g.ExporterName = exporter_name
 	g.MaxConns = 3
 	g.MaxIdleConns = 3
-	g.ExporterName = exporter_name_for_human
 
 	type plain GlobalConfig
 	if err := unmarshal((*plain)(g)); err != nil {
@@ -268,14 +377,15 @@ func (g *GlobalConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 
 // TargetConfig defines a DSN and a set of collectors to be executed on it.
 type TargetConfig struct {
-	Name       string     `yaml:"name"`             // data source name to connect to
-	DSN        Secret     `yaml:"data_source_name"` // data source definition to connect to
-	AuthName   string     `yaml:"auth_name,omitempty"`
-	AuthConfig AuthConfig `yaml:"auth_mode,omitempty"`
-
+	Name          string            `yaml:"name"`                    // data source name to connect to
+	DSN           Secret            `yaml:"data_source_name"`        // data source definition to connect to
+	Dsn           string            `yaml:"dsn"`                     // data source definition to connect to, synonym to data_source_name
+	ScrapeTimeout model.Duration    `yaml:"scrape_timeout"`          // per-scrape timeout, global
 	Labels        map[string]string `yaml:"labels,omitempty"`        // labels to apply to all metrics collected from the targets
 	CollectorRefs []string          `yaml:"collectors"`              // names of collectors to execute on the target
 	TargetsFiles  []string          `yaml:"targets_files,omitempty"` // slice of path and pattern for files that contains targets
+	AuthName      string            `yaml:"auth_name,omitempty"`
+	AuthConfig    AuthConfig        `yaml:"auth_config,omitempty"`
 
 	collectors []*CollectorConfig // resolved collector references
 	fromFile   string             // filepath if loaded from targets_files pattern
@@ -308,7 +418,12 @@ func (t *TargetConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 		}
 
 		if t.DSN == "" {
-			return fmt.Errorf("missing data_source_name for target %+v", t)
+			if t.Dsn != "" {
+				t.DSN = Secret(t.Dsn)
+				t.Dsn = ""
+			} else {
+				return fmt.Errorf("missing data_source_name for target %+v", t)
+			}
 		}
 		checkCollectorRefs(t.CollectorRefs, "target")
 
@@ -325,10 +440,6 @@ func (t *TargetConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 			}
 		}
 	}
-	if t.AuthConfig.Mode == "" {
-		t.AuthConfig.Mode = "basic"
-	}
-
 	return checkOverflow(t.XXX, "target")
 }
 
@@ -354,26 +465,49 @@ func (t *TargetConfig) checkLabelCollisions() error {
 }
 
 // method to build a temporary TargetConfig from "default" with host_name & and auth_name
-func (t *TargetConfig) Clone(host_path string, auth_name string) (*TargetConfig, error) {
+func (t *TargetConfig) Clone(dsn string, auth_name string) (*TargetConfig, error) {
 	new := &TargetConfig{
-		Name:       host_path,
-		DSN:        Secret(host_path),
-		AuthConfig: t.AuthConfig,
-		Labels:     t.Labels,
-		collectors: t.collectors,
+		Name:          dsn,
+		DSN:           Secret(dsn),
+		AuthConfig:    t.AuthConfig,
+		Labels:        t.Labels,
+		collectors:    t.collectors,
+		ScrapeTimeout: t.ScrapeTimeout,
 	}
 
-	url_elmt, err := url.Parse(host_path)
+	url_elmt, err := url.Parse(dsn)
 	if err != nil {
 		return nil, err
 	}
-
+	// if url_elmt.Scheme != "" && new.Scheme != url_elmt.Scheme {
+	// 	if url_elmt.Scheme == "https" || url_elmt.Scheme == "http" {
+	// 		new.Scheme = url_elmt.Scheme
+	// 	} else if url_elmt.Host == "" {
+	// 		// url.Parse for input "host.domain:port" builds .Scheme = "host.domain" .Opaque = "port"
+	// 		new.Host = url_elmt.Scheme
+	// 		if url_elmt.Opaque != "" {
+	// 			new.Port = url_elmt.Opaque
+	// 		}
+	// 	}
+	// }
+	// if url_elmt.Host == "" && url_elmt.Path != "" {
+	// 	new.Host = url_elmt.Path
+	// } else {
+	// 	if url_elmt.Host != "" {
+	// 		elmts := strings.Split(url_elmt.Host, ":")
+	// 		if new.Host != elmts[0] {
+	// 			new.Host = elmts[0]
+	// 		}
+	// 		if len(elmts) > 1 {
+	// 			new.Port = elmts[1]
+	// 		}
+	// 	}
+	// }
 	if url_elmt.User.Username() != "" {
 		new.AuthConfig.Username = url_elmt.User.Username()
 		if tmp, set := url_elmt.User.Password(); set {
 			new.AuthConfig.Password = Secret(tmp)
 		}
-		new.AuthConfig.Mode = "basic"
 	}
 	return new, nil
 }
@@ -390,9 +524,6 @@ type CollectorConfig struct {
 	Metrics     []*MetricConfig `yaml:"metrics"`                // metrics/queries defined by this collector
 	Queries     []*QueryConfig  `yaml:"queries,omitempty"`      // named queries defined by this collector
 
-	// id to print in log and to follow request action
-	id string
-
 	// Catches all undefined fields and must be empty after parsing.
 	XXX map[string]interface{} `yaml:",inline" json:"-"`
 }
@@ -401,6 +532,7 @@ type CollectorConfig struct {
 func (c *CollectorConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	// Default to undefined (a negative value) so it can be overridden by the global default when not explicitly set.
 	c.MinInterval = -1
+	c.NameSpace = ""
 
 	type plain CollectorConfig
 	if err := unmarshal((*plain)(c)); err != nil {
@@ -414,35 +546,31 @@ func (c *CollectorConfig) UnmarshalYAML(unmarshal func(interface{}) error) error
 		return fmt.Errorf("no metrics defined for collector %q", c.Name)
 	}
 
-	if c.NameSpace == "" {
-		c.NameSpace = exporter_namespace
-	}
+	// // Set metric.query for all metrics: resolve query references (if any) and generate QueryConfigs for literal queries.
+	// queries := make(map[string]*QueryConfig, len(c.Queries))
+	// for _, query := range c.Queries {
+	// 	queries[query.Name] = query
+	// }
+	// for _, metric := range c.Metrics {
+	// 	if !strings.HasPrefix(metric.Name, c.NameSpace) {
+	// 		metric.Name = fmt.Sprintf("%s_%s", c.NameSpace, metric.Name)
+	// 	}
 
-	// Set metric.query for all metrics: resolve query references (if any) and generate QueryConfigs for literal queries.
-	queries := make(map[string]*QueryConfig, len(c.Queries))
-	for _, query := range c.Queries {
-		queries[query.Name] = query
-	}
-	for _, metric := range c.Metrics {
-		if !strings.HasPrefix(metric.Name, c.NameSpace) {
-			metric.Name = fmt.Sprintf("%s_%s", c.NameSpace, metric.Name)
-		}
-
-		if metric.QueryRef != "" {
-			query, found := queries[metric.QueryRef]
-			if !found {
-				return fmt.Errorf("unresolved query_ref %q in metric %q of collector %q", metric.QueryRef, metric.Name, c.Name)
-			}
-			metric.query = query
-			query.metrics = append(query.metrics, metric)
-		} else {
-			// For literal queries generate a QueryConfig with a name based off collector and metric name.
-			metric.query = &QueryConfig{
-				Name:  metric.Name,
-				Query: metric.QueryLiteral,
-			}
-		}
-	}
+	// 	if metric.QueryRef != "" {
+	// 		query, found := queries[metric.QueryRef]
+	// 		if !found {
+	// 			return fmt.Errorf("unresolved query_ref %q in metric %q of collector %q", metric.QueryRef, metric.Name, c.Name)
+	// 		}
+	// 		metric.query = query
+	// 		query.metrics = append(query.metrics, metric)
+	// 	} else {
+	// 		// For literal queries generate a QueryConfig with a name based off collector and metric name.
+	// 		metric.query = &QueryConfig{
+	// 			Name:  metric.Name,
+	// 			Query: metric.QueryLiteral,
+	// 		}
+	// 	}
+	// }
 
 	return checkOverflow(c.XXX, "collector")
 }
@@ -591,11 +719,17 @@ func (s Secret) MarshalYAML() (interface{}, error) {
 }
 
 type AuthConfig struct {
-	Mode     string `yaml:"mode,omitempty"` // basic, encrypted, bearer
+	Realm    string `yaml:"realm,omitempty"`
 	Username string `yaml:"user,omitempty"`
 	Password Secret `yaml:"password,omitempty"`
-	Token    Secret `yaml:"token,omitempty"`
-	authKey  string
+	// authKey  string
+}
+
+func check_env_var(value string) string {
+	if value != "" && strings.HasPrefix(value, "$env:") {
+		value = os.Getenv(value[5:])
+	}
+	return value
 }
 
 // UnmarshalYAML implements the yaml.Unmarshaler interface for authConfig
@@ -605,27 +739,13 @@ func (auth *AuthConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 		return err
 	}
 
-	// Check required fields
-	if auth.Mode == "" {
-		auth.Mode = "basic"
-	} else {
-		auth.Mode = strings.ToLower(auth.Mode)
-		mode := make(map[string]int)
-		for _, val := range []string{"basic", "token", "script"} {
-			mode[val] = 1
-		}
-		if _, err := mode[auth.Mode]; !err {
-			return fmt.Errorf("invalid mode auth %s", auth.Mode)
-		}
-	}
-	if auth.Mode == "token" && auth.Token == "" {
-		return fmt.Errorf("token not set with auth mode 'token'")
-	}
+	// auth.Username == $env:VAR_NAME
+	auth.Username = check_env_var(auth.Username)
+	auth.Password = Secret(check_env_var(string(auth.Password)))
 
 	return nil
 }
 
-// *************************************************************************************************
 func checkCollectorRefs(collectorRefs []string, ctx string) error {
 	// At least one collector, no duplicates
 	if len(collectorRefs) == 0 {
@@ -650,6 +770,13 @@ func resolveCollectorRefs(
 			pat := regexp.MustCompile(cref[1:])
 			for c_name, c := range collectors {
 				if pat.MatchString(c_name) {
+					resolved = append(resolved, c)
+				}
+			}
+		} else if strings.HasPrefix(cref, "!~") {
+			pat := regexp.MustCompile(cref[2:])
+			for c_name, c := range collectors {
+				if !pat.MatchString(c_name) {
 					resolved = append(resolved, c)
 				}
 			}
