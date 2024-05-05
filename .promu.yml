@@ -5,9 +5,9 @@ repository:
     path: .
 build:
     binaries:
-        - name: mssql_exporter
+        - name: cmd/mssql_exporter
           path: .
-    flags: -tags mssql
+    flags: -tags netgo,usergo,static,mssql
     ldflags: |
       -X github.com/prometheus/common/version.Version={{.Version}}
       -X github.com/prometheus/common/version.Revision={{.Revision}}
@@ -15,8 +15,9 @@ build:
       -X github.com/prometheus/common/version.BuildDate={{date "2006-01-02T15:04:05"}}
       -X github.com/prometheus/common/version.BuildUser={{user}}@{{host}}
 tarball:
-    prefix: .
+    prefix: 
     files:
       - LICENSE
       - README.md
-      - config
+      - contribs
+      - cmd

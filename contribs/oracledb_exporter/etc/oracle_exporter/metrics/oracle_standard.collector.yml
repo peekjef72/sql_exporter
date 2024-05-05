@@ -1,0 +1,152 @@
+collector_name: oracle_standard
+# namespace: oracledb
+metrics:
+  - metric_name: max_process
+    help: "oracle maximun number of session"
+    type: gauge
+    values:
+      - max_process
+    query: |
+      select to_number(value) as max_process from v$parameter where name = 'processes'
+
+  - metric_name: "version"
+    help: "oracle version"
+    type: gauge
+    values:
+      - value
+    key_labels:
+      - version
+    query: "select 1 as value, version from v$instance"
+
+  - metric_name: "lock_contention"
+    help: "row lock contention"
+    values:
+      - lock_contention
+    query: |
+      select count(*) as lock_contention
+      from v$session
+      where event like 'enq: %'
+
+  - metric_name: "sort_disk"
+    help: "Nombre de sort sur disque"
+    values:
+      - sort_disk
+    query: |
+      select value as sort_disk
+      from v$sysstat
+      where name = 'sorts (disk)'
+
+  - metric_name: "sort_memory"
+    help: "Nombre de sort en memoire"
+    values:
+      - sort_memory
+    query: |
+      select value as sort_memory
+      from v$sysstat
+      where name = 'sorts (memory)'
+
+  - metric_name: "exec_tnx"
+    help: "Nombre exec par transaction"
+    values:
+      - exec_tnx
+    query: |
+      select avg(value) as exec_tnx
+      from v$metric
+      where metric_name = 'Executions Per Txn'
+
+  - metric_name: "cnt_tnx"
+    help: "Nombre de transactions"
+    values:
+      - cnt_tnx
+    query: |
+      select txncount as cnt_tnx
+      from v$undostat
+      where end_time = (select max(end_time) from v$undostat)
+
+  - metric_name: "tnx_persec"
+    help: "Nombre tnx par seconde"
+    values:
+      - tnx_persec
+    query: |
+      select txncount/((end_time - begin_time)*24*60*60) as tnx_persec
+      from v$undostat
+      where end_time = (select max(end_time) from v$undostat)
+
+  - metric_name: "soft_parse"
+    help: "Soft Parse %"
+    values:
+      - soft_parse
+    query: |
+      select value as soft_parse
+      from v$sysmetric
+      where group_id=3 and metric_id = '2055'
+
+  - metric_name: "seq_read"
+    help: "Wait Event db file sequential read"
+    values:
+      - seq_read
+    query: |
+      select sum(total_waits) as seq_read
+      from v$session_event
+      where event = 'db file sequential read'
+
+  - metric_name: "scat_read"
+    help: "Wait Event db file scattered read"
+    values:
+      - scat_read
+    query: |
+      select sum(average_wait) as scat_read
+      from v$session_event
+      where event = 'db file scattered read'
+
+  - metric_name: "cont_read"
+    help: "Wait Event control file sequential read"
+    values:
+      - cont_read
+    query: |
+      select sum(average_wait) as cont_read
+      from v$session_event
+      where event = 'control file sequential read'
+
+  - metric_name: "free_buffer"
+    help: "Free buffer requested total"
+    values:
+      - free_buffer
+    query: |
+      select sum(value) as free_buffer
+      from v$sesstat
+      where STATISTIC#='194'
+
+  - metric_name: "latch_free"
+    help: "latch free foreground"
+    values:
+      - latch_free
+    query: |
+      select ((time_waited_micro/total_waits)/1000) as latch_free
+      from stats$bg_event_summary
+      where snap_id=(
+          select max(snap_id)
+            from stats$bg_event_summary)
+        and event = 'latch free'
+
+  - metric_name: "log_file"
+    help: "Wait Event log file sync"
+    values:
+      - log_file
+    query: |
+      select ((time_waited_micro/total_waits)/1000) as log_file
+      from stats$system_event
+        where snap_id=(
+          select max(snap_id)
+            from stats$system_event)
+          and event = 'log file sync'
+
+  - metric_name: "exec_parse"
+    help: "Execute to Parse"
+    values:
+      - exec_parse
+    query: |
+      select value as exec_parse
+      from perfstat.mea_stat_instance
+      where name = 'Execute to Parse'
+        and (fin=(select max(fin) from perfstat.mea_stat_instance))
