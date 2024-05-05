@@ -1,4 +1,4 @@
-//go:build !db2 && mssql && !oracle
+//go:build !db2 && !hana && mssql && !oracle
 
 package main
 
@@ -8,8 +8,10 @@ import (
 	"fmt"
 	"strings"
 
-	_ "github.com/denisenkom/go-mssqldb" // register the MS-SQL driver
+	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
+	_ "github.com/microsoft/go-mssqldb" // register the MS-SQL driver
+	"github.com/peekjef72/httpapi_exporter/encrypt"
 )
 
 // OpenConnection extracts the driver name from the DSN (expected as the URI scheme), adjusts it where necessary (e.g.
@@ -46,17 +48,17 @@ import (
 // prefix replaced with `tcp://`):
 //
 //	clickhouse://host:port?username=username&password=password&database=dbname&param=value
-func OpenConnection(ctx context.Context, t *target) (*sql.DB, error) {
-	// ctx context.Context,
-	// logContext []interface{},
-	// logger log.Logger,
-	// dsn string,
-	// maxConns, maxIdleConns int,
-	// symbol_table map[string]interface{}) (*sql.DB, error) {
+func OpenConnection(
+	ctx context.Context,
+	logContext []interface{},
+	logger log.Logger,
+	dsn string,
+	auth AuthConfig,
+	maxConns, maxIdleConns int,
+	symbol_table map[string]interface{}) (*sql.DB, error) {
 
 	var driver string
 	// Extract driver name from DSN.
-	dsn := string(t.config.DSN)
 	idx := strings.Index(dsn, "://")
 	if idx == -1 {
 		driver = "sqlserver"
@@ -70,7 +72,7 @@ func OpenConnection(ctx context.Context, t *target) (*sql.DB, error) {
 	case "sqlserver":
 		var err error
 		if strings.HasPrefix(dsn, "sqlserver://") {
-			// "db2://<hostname>:<port>?user%20id=<login>&password=<password>&database=<database>&protocol=..."
+			// "sqlserver://<hostname>:<port>/<path>?user%20id=<login>&password=<password>&database=<database>&protocol=..."
 			params, err = splitConnectionStringURL(dsn)
 			if err != nil {
 				return nil, err
@@ -87,13 +89,50 @@ func OpenConnection(ctx context.Context, t *target) (*sql.DB, error) {
 		if !ok || val == "" {
 			return nil, fmt.Errorf("server can't be empty")
 		}
-		val, ok = params["user id"]
-		if !ok || val == "" {
-			return nil, fmt.Errorf("user Id can't be empty")
+
+		if auth.Username != "" {
+			params["user id"] = auth.Username
+		} else {
+			val, ok = params["user id"]
+			if !ok || val == "" {
+				return nil, fmt.Errorf("user Id can't be empty")
+			}
 		}
-		_, ok = params["password"]
-		if !ok {
-			return nil, fmt.Errorf("password has to be set")
+
+		if auth.Password != "" {
+			passwd := string(auth.Password)
+			if strings.HasPrefix(passwd, "/encrypted/") {
+				ciphertext := passwd[len("/encrypted/"):]
+				level.Debug(logger).Log(
+					"module", "sql::OpenConnection()",
+					"ciphertext", ciphertext)
+				auth_key := GetMapValueString(symbol_table, "auth_key")
+				level.Debug(logger).Log(
+					"module", "sql::OpenConnection()",
+					"auth_key", auth_key)
+				if auth_key == "" {
+					return nil, fmt.Errorf("password is encrypt and not ciphertext provided (auth_key)")
+				}
+				cipher, err := encrypt.NewAESCipher(auth_key)
+				if err != nil {
+					err := fmt.Errorf("can't obtain cipher to decrypt")
+					// level.Error(c.logger).Log("errmsg", err)
+					return nil, err
+				}
+				passwd, err = cipher.Decrypt(ciphertext, true)
+				if err != nil {
+					err := fmt.Errorf("invalid key provided to decrypt")
+					// level.Error(c.logger).Log("errmsg", err)
+					return nil, err
+				}
+				params["password"] = passwd
+			}
+
+		} else {
+			_, ok = params["password"]
+			if !ok {
+				return nil, fmt.Errorf("password has to be set")
+			}
 		}
 		// val, ok = params["database"]
 		// if !ok || val == "" {
@@ -101,11 +140,14 @@ func OpenConnection(ctx context.Context, t *target) (*sql.DB, error) {
 		// }
 
 		// add params to target symbol table
-		t.symtab["params"] = params
+		symbol_table["params"] = params
 
 	default:
 		return nil, fmt.Errorf("driver '%s' not supported", driver)
 	}
+
+	// rebuild dsn from params because params may have changed
+	dsn = GenDSNUrl(driver, params)
 
 	// Open the DB handle in a separate goroutine so we can terminate early if the context closes.
 	var (
@@ -126,11 +168,11 @@ func OpenConnection(ctx context.Context, t *target) (*sql.DB, error) {
 		}
 	}
 
-	conn.SetMaxIdleConns(t.globalConfig.MaxIdleConns)
-	conn.SetMaxOpenConns(t.globalConfig.MaxConns)
+	conn.SetMaxIdleConns(maxIdleConns)
+	conn.SetMaxOpenConns(maxConns)
 
-	t.logContext = append(t.logContext, "msg", fmt.Sprintf("Database handle successfully opened with driver %s.", driver))
-	level.Debug(t.logger).Log(t.logContext...)
+	logContext = append(logContext, "msg", fmt.Sprintf("Database handle successfully opened with driver %s.", driver))
+	level.Debug(logger).Log(logContext...)
 
 	return conn, nil
 }
