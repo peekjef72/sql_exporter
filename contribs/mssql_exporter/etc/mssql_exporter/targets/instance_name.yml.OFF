@@ -1,0 +1,15 @@
+# specify all configuration elements for the instance
+# name: the name to identify the instance; it is used as target value by prometheus /metrics?target=name
+name: MY_INSTANCE_NAME
+
+# Data source name always has a URI schema that matches the driver name. In some cases (e.g. MySQL)
+# the schema gets dropped or replaced to match the driver expected DSN format.
+data_source_name: 'sqlserver://<db_user>:<db_password>@><dbserver.host.domain>:<dbport>/<db_instance>'
+# or using dsn directives:
+# the schema gets dropped or replaced to match the driver expected DSN format.
+# if db_user contains a domain name it mus be double slashed e.g.: user%20id=WIN-DOMAIN\\login
+data_source_name: "sqlserver://<dbserver.host.domain>:<dbport>/<db_instance>?user%20id=<db_user>&password=<db_password>&realm=<db_domain>&database=<database>"
+
+# Collectors (referenced by name) to execute on the target.
+collectors: 
+  - mssql_standard

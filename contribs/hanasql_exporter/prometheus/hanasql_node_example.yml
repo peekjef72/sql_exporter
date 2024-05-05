@@ -1,0 +1,28 @@
+- targets: [ "hanasql_target_1" ]
+  labels:
+    __tmp_exporter_host: "hanasql_exporter_host.domain.name:9658"
+   # if you have activated password encrypted passphrass
+    __param_auth_key: __shared__auth_passphrase__
+    host: "hanasql_target_1_fullqualified.domain.name"
+    #custom labels…
+    environment: "DEV"
+
+# or
+- targets:
+    - hdb://<user>:<password>@host.domain.name:port/<instance>?params1=value1[&...]
+  labels:
+    __tmp_exporter_host: "hanasql_exporter_host.domain.name:9658"
+    __param_auth_key: __shared__auth_passphrase__
+    host: "hanasql_target_1_fullqualified.domain.name"
+    #custom labels…
+    environment: "DEV"
+
+- targets:
+    - hdb://host.domain.name:port/instance
+  labels:
+    __tmp_exporter_host: "hanasql_exporter_host.domain.name:9658"
+    __param_auth_name: <auth_name_to_use_on_remote_and_allready_defined>
+    __param_auth_key: __shared__auth_passphrase__
+    host: "hanasql_target_1_fullqualified.domain.name"
+    #custom labels…
+    environment: "DEV"

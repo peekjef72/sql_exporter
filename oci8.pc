@@ -1,0 +1,8 @@
+libdir=/usr/lib/oracle/19.23/client64/lib
+includedir=/usr/include/oracle/19.23/client64/
+
+Name: OCI
+Description: Oracle database driver
+Version: 19.23
+Libs: -L${libdir} -lclntsh
+Cflags: -I${includedir}

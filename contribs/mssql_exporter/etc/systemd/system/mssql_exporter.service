@@ -1,0 +1,23 @@
+[Unit]
+Description=MSSQL Exporter : Prometheus agent to collect MSSQLServer metrics
+Wants=network-online.target
+After=network-online.target
+StartLimitBurst=3
+StartLimitIntervalSec=150
+
+[Service]
+User=mssql_exporter
+Group=mssql_exporter
+WorkingDirectory=/opt/mssql_exporter
+Restart=always
+RestartSec=2
+Type=simple
+ExecStart=/opt/mssql_exporter/mssql_exporter \
+        --log.level=error \
+        --config.file=/etc/mssql_exporter/mssql_exporter.yml \
+        --web.listen-address=:9401
+
+ExecReload=/bin/kill -HUP $MAINPID
+
+[Install]
+WantedBy=multi-user.target

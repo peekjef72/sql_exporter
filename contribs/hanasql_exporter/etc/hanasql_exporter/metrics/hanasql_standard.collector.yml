@@ -1,0 +1,319 @@
+#
+# docs: https://anibalgoicochea.com/wp-content/uploads/2012/08/hana_monitor_views_en.pdf
+#
+collector_name: hanasql_standard
+# namespace: hanasql
+
+metrics:
+  - metric_name: uptime
+    help: Hana database uptime in seconds labeled by hanadb version
+    type: gauge
+    values:
+      - uptime
+    key_labels:
+      - version
+    query: |
+      select top 1 TO_INTEGER(SECONDS_BETWEEN(START_TIME, CURRENT_TIMESTAMP)) as uptime, version from sys.M_DATABASE
+  
+  - metric_name: status
+    help: "Check if hana db tenant is active: 1: active 0: inactive"
+    type: gauge
+    values:
+      - status
+    key_labels:
+      - database_name
+    query: |
+      select top 1 (
+          case 
+            when active_status = 'YES' then 1
+            else 0 end
+          ) as status,
+        database_name
+      from sys.m_databases
+
+  - metric_name: connection_active
+    help: Active Hana connections per service
+    type: gauge
+    values:
+      - connections
+    key_labels:
+      - service
+    query: |
+      select COUNT(IFNULL(C.CONNECTION_STATUS, 'IDLE')) as connections, 
+        S.service_name as service 
+      FROM sys.M_CONNECTIONS C 
+        inner join sys.M_SERVICES S on C.PORT = S.PORT 
+      WHERE 
+        C.LOGICAL_CONNECTION_ID = C.CONNECTION_ID 
+        AND C.OWN = 'FALSE'
+      group by S.service_name
+
+  - metric_name: connection_type
+    help: Hana connections type per service
+    type: gauge
+    values:
+      - connections
+    key_labels:
+      - service
+      - type
+    query: |
+      select COUNT(*) as connections, 
+        S.service_name as service,
+        C.connection_type as type
+      FROM sys.M_CONNECTIONS C 
+        inner join sys.M_SERVICES S on C.PORT = S.PORT 
+      WHERE 
+        C.LOGICAL_CONNECTION_ID = C.CONNECTION_ID 
+        AND C.OWN = 'FALSE'
+      group by S.service_name, C.connection_type
+
+  - metric_name: backup_status
+    help: "status of last hana backup: 1/successful - 2/running - 0/failed - 3/canceled"
+    type: gauge
+    values:
+      - status
+    key_labels:
+      - type
+    query_ref: backup_catalog
+
+  - metric_name: backup_timestamp
+    help: "timestamp of backup: if runnig start timestamp else end_timestamp"
+    type: gauge
+    values:
+      - timestamp
+    key_labels:
+      - type
+    query_ref: backup_catalog
+
+  - metric_name: backup_count
+    help: "Backup count in backup_catalog by type."
+    type: gauge
+    values:
+      - num
+    key_labels:
+      - type
+    query: |
+      SELECT count(*) as num,
+         entry_type_name as type
+      FROM sys.M_BACKUP_CATALOG
+      group by entry_type_name
+
+  - metric_name: backup_oldest
+    help: "Oldest Backup found in backup_catalog in second by type."
+    type: gauge
+    values:
+      - oldest_backup
+    key_labels:
+      - type
+    query: |
+      SELECT MIN(UTC_START_TIME) OLDEST_BACKUP,
+         entry_type_name as type
+      FROM sys.M_BACKUP_CATALOG
+      group by entry_type_name
+
+  - metric_name: replication_status
+    help: "status of system replication: 1/active - 0/stop - -1/error"
+    type: gauge
+    values:
+      - status
+    query: |
+      select top 1 (case 
+          when replication_status = 'active' then 1 
+          when replication_status = 'error' then -1 
+          else 0 end) as status
+      from sys.m_service_replication
+
+  - metric_name: table_locks
+    help: "Hana current number of table locks"
+    type: gauge
+    values:
+      - num_locks
+    query: |
+      select count(*) as num_locks from sys.m_table_locks
+
+  - metric_name: blocked_transactions
+    help: "Hana current number of blocked_transactions"
+    type: gauge
+    values:
+      - num_blocks
+    query: |
+      select count(*) as num_blocks from sys.m_blocked_transactions
+
+  - metric_name: allocated_rowstore_size
+    help: "Hana - allocated rowstore size in bytes"
+    type: gauge
+    values:
+      - size
+    key_labels:
+      - port
+    query: |
+      select TO_INTEGER(allocated_size) as size, port
+      from sys.m_rs_memory 
+      where category='TABLE'
+
+  # Tables files  size io  
+  - metric_name: schema_tables_disk_used_bytes
+    help: "Hana tables disk size in bytes by schema"
+    type: gauge
+    values:
+      - size
+    key_labels:
+      - schema_name
+    query_ref: virtual_file_stats
+
+  - metric_name: schema_tables_page_count
+    help: "Hana tables page count by schema"
+    type: counter
+    values:
+      - page_count
+    key_labels:
+      - schema_name
+    query_ref: virtual_file_stats
+
+  - metric_name: schema_tables_bytes_write
+    help: "Hana tables bytes written by schema"
+    type: counter
+    values:
+      - bytes_write
+    key_labels:
+      - schema_name
+    query_ref: virtual_file_stats
+
+  - metric_name: schema_tables_bytes_read
+    help: "Hana tables bytes read by schema"
+    type: counter
+    values:
+      - bytes_read
+    key_labels:
+      - schema_name
+    query_ref: virtual_file_stats
+
+  - metric_name: schema_tables_bytes_append
+    help: "Hana tables bytes appended by schema"
+    type: counter
+    values:
+      - bytes_append
+    key_labels:
+      - schema_name
+    query_ref: virtual_file_stats
+
+  # MEMORY for service
+  - metric_name: service_memory_physical_used_bytes
+    help: "memory used"
+    type: gauge
+    values:
+      - PM_SERVICE
+    key_labels:
+      - service_name
+    query_ref: service_memory
+
+  - metric_name: service_memory_total_used_bytes
+    help: "memory used"
+    type: gauge
+    values:
+      - TU_SERVICE
+    key_labels:
+      - service_name
+    query_ref: service_memory
+
+  - metric_name: service_stack_size_bytes
+    help: "memory used"
+    type: gauge
+    values:
+      - STACK
+    key_labels:
+      - service_name
+    query_ref: service_memory
+
+  - metric_name: service_memory_heaps_allocated_size_bytes
+    help: "memory used"
+    type: gauge
+    values:
+      - HEAP_AB_B
+    key_labels:
+      - service_name
+    query_ref: service_memory
+
+  - metric_name: service_memory_shared_allocated_size_bytes
+    help: "memory used"
+    type: gauge
+    values:
+      - SHARED_AB
+    key_labels:
+      - service_name
+    query_ref: service_memory
+
+  - metric_name: service_memory_heaps_used_size_bytes
+    help: "memory used"
+    type: gauge
+    values:
+      - HEAP_U
+    key_labels:
+      - service_name
+    query_ref: service_memory
+
+  - metric_name: service_memory_allocation_limit_size_bytes
+    help: "memory used"
+    type: gauge
+    values:
+      - ALLOCATION_LIMIT
+    key_labels:
+      - service_name
+    query_ref: service_memory
+
+  - metric_name: service_memory_effective_allocation_limit_size_bytes
+    help: "memory used"
+    type: gauge
+    values:
+      - EFFECTIVE_ALLOCATION_LIMIT
+    key_labels:
+      - service_name
+    query_ref: service_memory
+
+queries:
+  # backup
+  - query_name: backup_catalog
+    query: |
+      select (case 
+            when state_name = 'successful' then 1
+            when state_name = 'running' then 2
+            when state_name = 'failed' then 0
+            else 3 end) as status,
+            (case 
+              when state_name = 'running' then utc_start_time
+              else utc_end_time end ) as timestamp,
+          entry_type_name as type 
+      from sys.m_backup_catalog 
+      where 
+        entry_id in (
+          select max(entry_id)
+          from m_backup_catalog
+          group by entry_type_name
+        )
+
+  # Populates `resident_memory_bytes`, `virtual_memory_bytes`, `memory_utilization_percentage` and
+  # `page_fault_count`.
+  - query_name: service_memory
+    query: |
+      SELECT
+        SERVICE_NAME, 
+        PHYSICAL_MEMORY_SIZE AS PM_SERVICE,	/*VmRSS in /proc/%p/status*/ /*SUM=DB_RESIDENT IN HANA STUDIO*/
+        TOTAL_MEMORY_USED_SIZE AS TU_SERVICE,
+        STACK_SIZE AS STACK,
+        HEAP_MEMORY_ALLOCATED_SIZE AS HEAP_AB_B,	/*AB in IPMM*/
+        SHARED_MEMORY_ALLOCATED_SIZE AS SHARED_AB,
+        HEAP_MEMORY_USED_SIZE AS HEAP_U,
+        ALLOCATION_LIMIT,
+        EFFECTIVE_ALLOCATION_LIMIT
+      FROM SYS.M_SERVICE_MEMORY
+
+  - query_name: virtual_file_stats
+    query: |
+      select schema_name,
+        sum(disk_size) as size,
+        sum(page_count) as page_count,
+        sum(bytes_written) as bytes_write,
+        sum(bytes_read) as bytes_read,
+        sum(bytes_appended) as bytes_append
+      from sys.m_table_persistence_statistics
+      group by schema_name

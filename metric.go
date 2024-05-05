@@ -1,11 +1,8 @@
-package sql_exporter
+package main
 
 import (
 	"fmt"
 	"sort"
-
-	"github.com/peekjef72/sql_exporter/config"
-	// "sql_exporter/errors"
 
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
@@ -28,14 +25,14 @@ type MetricDesc interface {
 
 // MetricFamily implements MetricDesc for SQL metrics, with logic for populating its labels and values from sql.Rows.
 type MetricFamily struct {
-	config      *config.MetricConfig
+	config      *MetricConfig
 	constLabels []*dto.LabelPair
 	labels      []string
 	logContext  []interface{}
 }
 
 // NewMetricFamily creates a new MetricFamily with the given metric config and const labels (e.g. job and instance).
-func NewMetricFamily(logContext []interface{}, mc *config.MetricConfig, constLabels []*dto.LabelPair) (*MetricFamily, error) {
+func NewMetricFamily(logContext []interface{}, mc *MetricConfig, constLabels []*dto.LabelPair) (*MetricFamily, error) {
 	logContext = append(logContext, "metric", mc.Name)
 
 	if len(mc.Values) == 0 {
@@ -81,8 +78,12 @@ func (mf MetricFamily) Collect(row map[string]interface{}, ch chan<- Metric) {
 		if mf.config.ValueLabel != "" {
 			labelValues[len(labelValues)-1] = v
 		}
-		value := row[v].(float64)
-		ch <- NewMetric(&mf, value, labelValues...)
+		if row[v] != nil {
+			value := row[v].(float64)
+			ch <- NewMetric(&mf, value, labelValues...)
+		} else {
+			fmt.Println("error !!!!")
+		}
 	}
 }
 

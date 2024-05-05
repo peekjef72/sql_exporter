@@ -1,0 +1,22 @@
+go:
+    cgo: false
+repository:
+    path: github.com/peekjef72/sql_exporter
+    path: .
+build:
+    binaries:
+        - name: hanasql_exporter
+          path: .
+    flags: -tags hana
+    ldflags: |
+      -X github.com/prometheus/common/version.Version={{.Version}}
+      -X github.com/prometheus/common/version.Revision={{.Revision}}
+      -X github.com/prometheus/common/version.Branch={{.Branch}}
+      -X github.com/prometheus/common/version.BuildDate={{date "2006-01-02T15:04:05"}}
+      -X github.com/prometheus/common/version.BuildUser={{user}}@{{host}}
+tarball:
+    prefix: .
+    files:
+        - LICENSE
+        - README.md
+        - config

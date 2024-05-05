@@ -18,11 +18,14 @@ pkgs    = $(shell $(GO) list ./... | grep -v /vendor/)
 
 PREFIX              ?= $(shell pwd)
 BIN_DIR             ?= $(shell pwd)
-DOCKER_IMAGE_NAME   ?= sql-exporter
+BASE_DIR            ?= $(shell dirname $(BIN_DIR))
+MSSQL_DIR			?= $(BASE_DIR)/mssql_exporter
+DB2_DIR				?= $(BASE_DIR)/db2_exporter
+DOCKER_IMAGE_NAME   ?= mssql-exporter
 DOCKER_IMAGE_TAG    ?= $(subst /,-,$(shell git rev-parse --abbrev-ref HEAD))
 
 
-all: promu build test
+all: promu build
 
 style:
 	@echo ">> checking code style"
@@ -40,13 +43,57 @@ vet:
 	@echo ">> vetting code"
 	@$(GO) vet $(pkgs)
 
-build: promu
-	@echo ">> building binaries"
-	@$(PROMU) build --prefix $(PREFIX)
+build-mssql: promu
+	@echo ">> building MSSQL binaries"
+	@$(PROMU) build --prefix $(PREFIX) -v
 
-tarball: promu
-	@echo ">> building release tarball"
-	@$(PROMU) tarball --prefix $(PREFIX) $(BIN_DIR)
+build-ora: promu 
+	@echo ">> building ORACLE binaries"
+	@$(PROMU) build --prefix $(PREFIX) --config=.promu-oracle.yml
+
+build-db2: promu 
+	@echo ">> building DB2 binaries"
+	@$(PROMU) build --prefix $(PREFIX) --config=.promu-db2.yml
+
+build-hana: promu 
+	@echo ">> building HANASQL binaries"
+	@$(PROMU) build --prefix $(PREFIX) --config=.promu-hana.yml
+
+build: build-mssql build-db2 build-hana #build-ora
+
+tarball-mssql: mssql_exporter
+	@echo ">> building mssql release tarball"
+	@mv $(BIN_DIR)/contribs/mssql_exporter $(BIN_DIR)/config
+	@git remote set-url origin "https://github.com/peekjef72/mssql_exporter.git"
+	@$(PROMU) tarball --config=.promu.yml
+	@git remote set-url origin "https://github.com/peekjef72/sql_exporter.git"
+	@mv $(BIN_DIR)/config $(BIN_DIR)/contribs/mssql_exporter
+
+tarball-db2: build-db2
+	@echo ">> building db2 release tarball"
+	@mv $(BIN_DIR)/contribs/db2_exporter $(BIN_DIR)/config
+	@git remote set-url origin "https://github.com/peekjef72/db2_exporter.git"
+	@$(PROMU) tarball --config=.promu-db2.yml
+	@git remote set-url origin "https://github.com/peekjef72/sql_exporter.git"
+	@mv $(BIN_DIR)/config $(BIN_DIR)/contribs/db2_exporter
+
+tarball-ora: build-ora
+	@echo ">> building oracledb release tarball"
+	@mv $(BIN_DIR)/contribs/oracledb_exporter $(BIN_DIR)/config
+	@git remote set-url origin "https://github.com/peekjef72/oracledb_exporter.git"
+	@$(PROMU) tarball --config=.promu-oracle.yml
+	@git remote set-url origin "https://github.com/peekjef72/sql_exporter.git"
+	@mv $(BIN_DIR)/config $(BIN_DIR)/contribs/oracledb_exporter
+
+tarball-hana: build-hana 
+	@echo ">> building HANASQL release tarball"
+	@mv $(BIN_DIR)/contribs/hanasql_exporter $(BIN_DIR)/config
+	@git remote set-url origin "https://github.com/peekjef72/hanasql_exporter.git"
+	@$(PROMU) tarball --config=.promu-hana.yml
+	@git remote set-url origin "https://github.com/peekjef72/sql_exporter.git"
+	@mv $(BIN_DIR)/config $(BIN_DIR)/contribs/hanasql_exporter
+
+tarball: tarball-mssql tarball-db2 tarball-hana #tarball-ora
 
 docker:
 	@echo ">> building docker image"
