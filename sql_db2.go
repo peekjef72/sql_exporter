@@ -11,7 +11,7 @@ import (
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	_ "github.com/ibmdb/go_ibm_db" // register the DB2 driver
-	"github.com/peekjef72/httpapi_exporter/encrypt"
+	"github.com/peekjef72/passwd_encrypt/encrypt"
 )
 
 // OpenConnection extracts the driver name from the DSN (expected as the URI scheme), adjusts it where necessary (e.g.

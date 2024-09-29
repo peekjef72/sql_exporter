@@ -5,11 +5,10 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 
-	"github.com/go-kit/log"
-	"github.com/go-kit/log/level"
 	dto "github.com/prometheus/client_model/go"
 )
 
@@ -25,14 +24,14 @@ type collector struct {
 	config     *CollectorConfig
 	queries    []*Query
 	logContext []interface{}
-	logger     log.Logger
+	logger     *slog.Logger
 }
 
 // NewCollector returns a new Collector with the given configuration and database. The metrics it creates will all have
 // the provided const labels applied.
 func NewCollector(
 	logContext []interface{},
-	logger log.Logger,
+	logger *slog.Logger,
 	cc *CollectorConfig,
 	constLabels []*dto.LabelPair) (Collector, error) {
 
@@ -71,11 +70,11 @@ func NewCollector(
 		logger:     logger,
 	}
 	if c.config.MinInterval > 0 {
-		var logCtx []interface{}
+		var logCtx []any
 
 		logCtx = append(logCtx, logContext...)
 		logCtx = append(logCtx, "msg", fmt.Sprintf("Non-zero min_interval (%s), using cached collector.", c.config.MinInterval))
-		level.Debug(logger).Log(logCtx...)
+		logger.Debug("stack", logCtx...)
 		return newCachingCollector(&c), nil
 	}
 	return &c, nil
@@ -145,7 +144,7 @@ func (cc *cachingCollector) Collect(
 			logCtx = append(logCtx, cc.rawColl.logContext...)
 			logCtx = append(logCtx, "msg", fmt.Sprintf("Collecting fresh metrics: min_interval=%.3fs cache_age=%.3fs",
 				cc.minInterval.Seconds(), age.Seconds()))
-			level.Debug(cc.rawColl.logger).Log(logCtx...)
+			cc.rawColl.logger.Debug("stacked", logCtx...)
 			cacheChan := make(chan Metric, capMetricChan)
 			cc.cache = make([]Metric, 0, len(cc.cache))
 			go func() {
@@ -163,7 +162,7 @@ func (cc *cachingCollector) Collect(
 			logCtx = append(logCtx, cc.rawColl.logContext...)
 			logCtx = append(logCtx, "msg", fmt.Sprintf("Returning cached metrics: min_interval=%.3fs cache_age=%.3fs",
 				cc.minInterval.Seconds(), age.Seconds()))
-			level.Debug(cc.rawColl.logger).Log(logCtx...)
+			cc.rawColl.logger.Debug("stacked", logCtx...)
 			for _, metric := range cc.cache {
 				ch <- metric
 			}

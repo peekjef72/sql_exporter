@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,9 +13,6 @@ import (
 	"sync"
 	"time"
 
-	// "github.com/peekjef72/db2_exporter"
-
-	"github.com/go-kit/log/level"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/expfmt"
 )
@@ -24,6 +22,10 @@ const (
 	contentLengthHeader   = "Content-Length"
 	contentEncodingHeader = "Content-Encoding"
 	acceptEncodingHeader  = "Accept-Encoding"
+	acceptHeader          = "Accept"
+	applicationJSON       = "application/json"
+	textHTML              = "text/html"
+	textPLAIN             = "text/plain"
 )
 
 // ExporterHandlerFor returns an http.Handler for the provided Exporter.
@@ -36,16 +38,16 @@ func ExporterHandlerFor(exporter Exporter) http.Handler {
 		)
 
 		params := req.URL.Query()
-		tname := params.Get("target")
+		tname := strings.TrimSpace(params.Get("target"))
 		if tname == "" || tname == "template" {
-			err := fmt.Errorf("Target parameter is missing")
+			err := errors.New("Target parameter is missing")
 			HandleError(http.StatusBadRequest, err, *metricsPath, exporter, w, req)
 			return
 		}
 
 		target, err = exporter.FindTarget(tname)
 		if err == ErrTargetNotFound {
-			model := params.Get("model")
+			model := strings.TrimSpace(params.Get("model"))
 			if model == "" {
 				model = "default"
 			}
@@ -97,7 +99,8 @@ func ExporterHandlerFor(exporter Exporter) http.Handler {
 		gatherer := prometheus.Gatherers{exporter.WithContext(ctx, target)}
 		mfs, err := gatherer.Gather()
 		if err != nil {
-			level.Error(exporter.Logger()).Log("msg", fmt.Sprintf("Error gathering metrics: %s", err))
+			exporter.Logger().Error(
+				fmt.Sprintf("Error gathering metrics for '%s': %s", tname, err))
 			if len(mfs) == 0 {
 				http.Error(w, "No metrics gathered, "+err.Error(), http.StatusInternalServerError)
 				return
@@ -113,14 +116,16 @@ func ExporterHandlerFor(exporter Exporter) http.Handler {
 		for _, mf := range mfs {
 			if err := enc.Encode(mf); err != nil {
 				errs = append(errs, err)
-				level.Info(exporter.Logger()).Log("msg", fmt.Sprintf("Error encoding metric family %q: %s", mf.GetName(), err))
+				exporter.Logger().Info(
+					fmt.Sprintf("Error encoding metric family %q: %s", mf.GetName(), err.Error()))
 			}
 		}
 		if closer, ok := writer.(io.Closer); ok {
 			closer.Close()
 		}
 		if errs.MaybeUnwrap() != nil && buf.Len() == 0 {
-			http.Error(w, "No metrics encoded, "+errs.Error(), http.StatusInternalServerError)
+			err = fmt.Errorf("no metrics encoded: %s, ", errs.Error())
+			HandleError(http.StatusInternalServerError, err, *metricsPath, exporter, w, req)
 			return
 		}
 		header := w.Header()
@@ -140,15 +145,17 @@ func contextFor(req *http.Request, exporter Exporter, target Target) (context.Co
 	if v := req.Header.Get("X-Prometheus-Scrape-Timeout-Seconds"); v != "" {
 		timeoutSeconds, err := strconv.ParseFloat(v, 64)
 		if err != nil {
-			level.Error(exporter.Logger()).Log("msg", fmt.Sprintf("Failed to parse timeout (`%s`) from Prometheus header: %s", v, err))
+			exporter.Logger().Error(
+				fmt.Sprintf("Failed to parse timeout (`%s`) from Prometheus header: %s", v, err.Error()))
 		} else {
 			timeout = time.Duration(timeoutSeconds * float64(time.Second))
 
 			// Subtract the timeout offset, unless the result would be negative or zero.
 			timeoutOffset := time.Duration(exporter.Config().Globals.TimeoutOffset)
 			if timeoutOffset > timeout {
-				level.Error(exporter.Logger()).Log("msg", fmt.Sprintf("global.scrape_timeout_offset (`%s`) is greater than Prometheus' scraping timeout (`%s`), ignoring",
-					timeoutOffset, timeout))
+				exporter.Logger().Error(
+					fmt.Sprintf("global.scrape_timeout_offset (`%s`) is greater than Prometheus' scraping timeout (`%s`), ignoring",
+						timeoutOffset, timeout))
 			} else {
 				timeout -= timeoutOffset
 			}
@@ -161,11 +168,14 @@ func contextFor(req *http.Request, exporter Exporter, target Target) (context.Co
 	}
 
 	if timeout <= 0 {
+		target.SetDeadline(time.Time{})
 		return context.Background(), func() {}
 	}
-	level.Debug(exporter.Logger()).Log("msg", fmt.Sprintf("launching exporter.Gather() with timeout `%s`", timeout))
+	exporter.Logger().Debug(
+		fmt.Sprintf("launching exporter.Gather() with timeout `%s`", timeout))
+	target.SetDeadline(time.Now().Add(timeout))
 
-	return context.WithTimeout(context.Background(), timeout)
+	return context.WithDeadline(context.Background(), target.GetDeadline())
 	// return context.WithTimeout(context.Background(), timeout)
 }
 

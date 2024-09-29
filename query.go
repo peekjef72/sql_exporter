@@ -6,13 +6,11 @@ import (
 	"database/sql"
 	"fmt"
 	"html/template"
+	"log/slog"
 	"reflect"
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/go-kit/log"
-	"github.com/go-kit/log/level"
 )
 
 // Query wraps a sql.Stmt and all the metrics populated from it. It helps extract keys and values from result rows.
@@ -23,7 +21,7 @@ type Query struct {
 	columnTypes columnTypeMap
 	fieldTypes  fieldTypeMap
 	logContext  []interface{}
-	logger      log.Logger
+	logger      *slog.Logger
 
 	conn *sql.DB
 	stmt *sql.Stmt
@@ -75,7 +73,7 @@ func (ni *NullTime) ToFloat() float64 {
 // NewQuery returns a new Query that will populate the given metric families.
 func NewQuery(
 	logContext []interface{},
-	logger log.Logger,
+	logger *slog.Logger,
 	qc *QueryConfig,
 	metricFamilies ...*MetricFamily) (*Query, error) {
 	logContext = append(logContext, "query", qc.Name)
@@ -257,7 +255,7 @@ func (q *Query) scanDest(rows *sql.Rows) ([]interface{}, error) {
 						q.fieldTypes[column] = fieldTypeString
 					case reflect.ValueOf(time.Time{}).Kind():
 						q.fieldTypes[column] = fieldTypeTime
-						level.Debug(q.logger).Log("queryname", q.config.Name, "columnType", fieldType[i].DatabaseTypeName())
+						q.logger.Debug(q.config.Name, "columnType", fieldType[i].DatabaseTypeName())
 					default:
 						q.fieldTypes[column] = fieldTypeNumber
 					}
@@ -304,10 +302,10 @@ func (q *Query) scanDest(rows *sql.Rows) ([]interface{}, error) {
 			logCtx = append(logCtx, q.logContext...)
 			if column == "" {
 				logCtx = append(logCtx, "msg", fmt.Sprintf("Unnamed column %d returned by query", i))
-				level.Warn(q.logger).Log(logCtx...)
+				q.logger.Warn("msgstack", logCtx...)
 			} else {
 				logCtx = append(logCtx, "msg", fmt.Sprintf("Extra column %q returned by query", column))
-				level.Warn(q.logger).Log(logCtx...)
+				q.logger.Warn("msgstack", logCtx...)
 			}
 			dest = append(dest, new(interface{}))
 		}

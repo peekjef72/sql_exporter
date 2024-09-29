@@ -3,17 +3,16 @@ package main
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 
 	"google.golang.org/protobuf/proto"
 
 	kingpin "github.com/alecthomas/kingpin/v2"
-	"github.com/go-kit/log"
-	"github.com/go-kit/log/level"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
-	"github.com/prometheus/common/promlog"
+	"github.com/prometheus/common/promslog"
 )
 
 var dsnOverride = kingpin.Flag("config.data-source-name", "Data source name to override the value in the configuration file with.").String()
@@ -31,7 +30,7 @@ type Exporter interface {
 	// Config returns the Exporter's underlying Config object.
 	Config() *Config
 	Targets() []Target
-	Logger() log.Logger
+	Logger() *slog.Logger
 	AddTarget(*TargetConfig) (Target, error)
 	FindTarget(string) (Target, error)
 	GetFirstTarget() (Target, error)
@@ -42,7 +41,7 @@ type Exporter interface {
 
 	SetLogLevel(level string)
 	GetLogLevel() string
-	IncreaseLogLevel()
+	IncreaseLogLevel(string)
 
 	ReloadConfig() error
 }
@@ -53,7 +52,7 @@ type exporter struct {
 
 	cur_target    Target
 	ctx           context.Context
-	logger        log.Logger
+	logger        *slog.Logger
 	start_time    string
 	reload_time   string
 	logLevel      string
@@ -61,7 +60,7 @@ type exporter struct {
 }
 
 // NewExporter returns a new Exporter with the provided config.
-func NewExporter(configFile string, logger log.Logger, collectorName string) (Exporter, error) {
+func NewExporter(configFile string, logger *slog.Logger, collectorName string) (Exporter, error) {
 	c, err := LoadConfig(configFile, logger, collectorName)
 	if err != nil {
 		return nil, err
@@ -125,14 +124,7 @@ func (e *exporter) Gather() ([]*dto.MetricFamily, error) {
 	)
 
 	var wg sync.WaitGroup
-	// wg.Add(len(e.targets))
-	// for _, t := range e.targets {
-	// 	go func(target Target) {
-	// 		defer wg.Done()
-	// 		target.Collect(e.ctx, metricChan)
-	// 	}(t)
-	// }
-	// add only cur target
+
 	wg.Add(1)
 	go func(target Target) {
 		defer wg.Done()
@@ -198,7 +190,7 @@ func (e *exporter) Targets() []Target {
 }
 
 // Logger implements Exporter.
-func (e *exporter) Logger() log.Logger {
+func (e *exporter) Logger() *slog.Logger {
 	return e.logger
 }
 
@@ -269,40 +261,67 @@ func (e *exporter) GetLogLevel() string {
 	return e.logLevel
 }
 
-func (e *exporter) IncreaseLogLevel() {
-	var Level func(log.Logger) log.Logger
+func (e *exporter) IncreaseLogLevel(new_lvl string) {
+	var log func(msg string, args ...any)
 	e.content_mutex.Lock()
-	switch e.logLevel {
-	case "debug":
-		e.logLevel = "info"
-		Level = level.Info
-	case "info":
-		e.logLevel = "warn"
-		Level = level.Warn
-	case "warn":
-		e.logLevel = "error"
-		Level = level.Error
-	case "error":
-		e.logLevel = "debug"
-		Level = level.Debug
+	defer e.content_mutex.Unlock()
+
+	if new_lvl == "" {
+		switch e.logLevel {
+		case "debug":
+			e.logLevel = "info"
+			// Level = slog.LevelInfo
+		case "info":
+			e.logLevel = "warn"
+			// Level = slog.LevelWarn
+		case "warn":
+			e.logLevel = "error"
+			// Level = slog.LevelError
+		case "error":
+			e.logLevel = "debug"
+			// Level = slog.LevelDebug
+		}
+	} else {
+		switch new_lvl {
+		case "debug":
+			// Level = slog.LevelDebug
+			log = e.logger.Debug
+		case "info":
+			// Level = slog.LevelInfo
+			log = e.logger.Info
+		case "warn":
+			// Level = slog.LevelWarn
+			log = e.logger.Warn
+		case "error":
+			// Level = slog.LevelError
+			log = e.logger.Error
+		default:
+			e.logger.Error(fmt.Sprintf("invalid log.level specified %s", new_lvl))
+			return
+		}
+		if e.logLevel == new_lvl {
+
+			log("msg", "set log.level unchanged")
+			return
+		}
+		e.logLevel = new_lvl
 	}
-	// e.logger =
-	// lvl := &promlog.AllowedLevel{}
-	// lvl.Set(e.logLevel)
-	// fmt := &promlog.AllowedFormat{}
-	// fmt.Set()
-	// logConfig := promlog.Config{
-	// 	Level:  lvl,
-	// 	Format: fmt,
-	// }
 	logConfig.Level.Set(e.logLevel)
-	e.logger = promlog.New(&logConfig)
+	e.logger = promslog.New(&logConfig)
 	for _, t := range e.targets {
 		t.SetLogger(e.logger)
 	}
-	e.content_mutex.Unlock()
-	// level.Info(e.logger).Log("msg", fmt.Sprintf("set log.level to %s", e.logLevel))
-	Level(e.logger).Log("msg", fmt.Sprintf("set log.level to %s", e.logLevel))
+	switch e.logLevel {
+	case "debug":
+		log = e.logger.Debug
+	case "info":
+		log = e.logger.Info
+	case "warn":
+		log = e.logger.Warn
+	case "error":
+		log = e.logger.Error
+	}
+	log(fmt.Sprintf("set log.level to %s", e.logLevel))
 }
 
 func (e *exporter) ReloadConfig() error {

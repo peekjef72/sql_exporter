@@ -6,12 +6,11 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log/slog"
 	"strings"
 
-	"github.com/go-kit/log"
-	"github.com/go-kit/log/level"
 	_ "github.com/microsoft/go-mssqldb" // register the MS-SQL driver
-	"github.com/peekjef72/httpapi_exporter/encrypt"
+	"github.com/peekjef72/passwd_encrypt/encrypt"
 )
 
 // OpenConnection extracts the driver name from the DSN (expected as the URI scheme), adjusts it where necessary (e.g.
@@ -31,7 +30,7 @@ import (
 func OpenConnection(
 	ctx context.Context,
 	logContext []interface{},
-	logger log.Logger,
+	logger *slog.Logger,
 	dsn string,
 	auth AuthConfig,
 	maxConns, maxIdleConns int,
@@ -90,12 +89,11 @@ func OpenConnection(
 		passwd := val
 		if strings.HasPrefix(passwd, "/encrypted/") {
 			ciphertext := passwd[len("/encrypted/"):]
-			level.Debug(logger).Log(
-				"module", "sql::OpenConnection()",
+			logger.Debug("debug ciphertext",
 				"ciphertext", ciphertext)
 			auth_key := GetMapValueString(symbol_table, "auth_key")
-			level.Debug(logger).Log(
-				"module", "sql::OpenConnection()",
+			logger.Debug(
+				"debug authkey",
 				"auth_key", auth_key)
 			if auth_key == "" {
 				return nil, fmt.Errorf("password is encrypt and not ciphertext provided (auth_key)")
@@ -153,7 +151,7 @@ func OpenConnection(
 	conn.SetMaxOpenConns(maxConns)
 
 	logContext = append(logContext, "msg", fmt.Sprintf("Database handle successfully opened with driver %s.", driver))
-	level.Debug(logger).Log(logContext...)
-
+	logger.Debug("msg_stack",
+		logContext...)
 	return conn, nil
 }

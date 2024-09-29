@@ -4,12 +4,12 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
+	"log/slog"
 	"reflect"
 	"sort"
 	"sync"
 	"time"
 
-	"github.com/go-kit/log"
 	"github.com/imdario/mergo"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
@@ -34,9 +34,11 @@ type Target interface {
 	Collect(ctx context.Context, ch chan<- Metric)
 	Name() string
 	Config() *TargetConfig
+	GetDeadline() time.Time
+	SetDeadline(time.Time)
 	SetSymbol(string, any) error
 	GetSymbolTable() map[string]any
-	SetLogger(log.Logger)
+	SetLogger(*slog.Logger)
 	Lock()
 	Unlock()
 }
@@ -54,8 +56,10 @@ type target struct {
 	collectorStatusDesc MetricDesc
 	logContext          []interface{}
 
-	conn          *sql.DB
-	logger        log.Logger
+	conn     *sql.DB
+	logger   *slog.Logger
+	deadline time.Time
+
 	symbols_table map[string]interface{}
 
 	// to protect the data during exchange
@@ -70,7 +74,7 @@ func NewTarget(
 	ccs []*CollectorConfig,
 	constLabels prometheus.Labels,
 	gc *GlobalConfig,
-	logger log.Logger) (Target, error) {
+	logger *slog.Logger) (Target, error) {
 
 	if tpar.Name != "" {
 		logContext = append(logContext, "target", tpar.Name)
@@ -182,7 +186,17 @@ func (t *target) GetSymbolTable() map[string]any {
 	return t.symbols_table
 }
 
-func (t *target) SetLogger(logger log.Logger) {
+// Getter for deadline
+func (t *target) GetDeadline() time.Time {
+	return t.deadline
+}
+
+// Setter for deadline
+func (t *target) SetDeadline(tt time.Time) {
+	t.deadline = tt
+}
+
+func (t *target) SetLogger(logger *slog.Logger) {
 	t.content_mutex.Lock()
 	t.logger = logger
 	t.content_mutex.Unlock()
