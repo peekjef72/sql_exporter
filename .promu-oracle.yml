@@ -5,19 +5,16 @@ repository:
 build:
     static: false
     binaries:
-        - name: cmd/oracle_exporter
+        - name: cmd/oracledb_exporter
           path: .
-    flags: |
-        -gcflags -I=/usr/include/oracle/19.16/client64 -tags netgo,usergo,oracle
+    flags: -tags oracle
 
     ldflags: |
-        -L /usr/lib/oracle/19.23/client64/lib
         -X github.com/prometheus/common/version.Version={{.Version}}
         -X github.com/prometheus/common/version.Revision={{.Revision}}
         -X github.com/prometheus/common/version.Branch={{.Branch}}
         -X github.com/prometheus/common/version.BuildDate={{date "2006-01-02T15:04:05"}}
         -X github.com/prometheus/common/version.BuildUser={{user}}@{{host}}
-    # static: false
 tarball:
     prefix: .
     files:

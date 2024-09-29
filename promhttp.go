@@ -37,7 +37,7 @@ func ExporterHandlerFor(exporter Exporter) http.Handler {
 
 		params := req.URL.Query()
 		tname := params.Get("target")
-		if tname == "" {
+		if tname == "" || tname == "template" {
 			err := fmt.Errorf("Target parameter is missing")
 			HandleError(http.StatusBadRequest, err, *metricsPath, exporter, w, req)
 			return

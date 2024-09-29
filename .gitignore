@@ -16,6 +16,9 @@
 *.code-workspace
 .vscode/
 
+.env*
 
 local_config/
 cmd/
+
+oci*

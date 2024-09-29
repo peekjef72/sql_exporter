@@ -93,10 +93,21 @@ func NewTarget(
 		}
 		collectors = append(collectors, c)
 	}
-	upMetricName := gc.NameSpace + "_up"
-	upDesc := NewAutomaticMetricDesc(logContext, upMetricName, upMetricHelp, prometheus.GaugeValue, constLabelPairs)
-	scrapeDurationDesc :=
-		NewAutomaticMetricDesc(logContext, scrapeDurationName, scrapeDurationHelp, prometheus.GaugeValue, constLabelPairs)
+
+	upDesc := NewAutomaticMetricDesc(
+		logContext,
+		gc.NameSpace+"_up",
+		upMetricHelp,
+		prometheus.GaugeValue,
+		constLabelPairs,
+	)
+
+	scrapeDurationDesc := NewAutomaticMetricDesc(logContext,
+		gc.NameSpace+"_"+scrapeDurationName,
+		scrapeDurationHelp,
+		prometheus.GaugeValue,
+		constLabelPairs,
+	)
 
 	collectorStatusDesc := NewAutomaticMetricDesc(logContext,
 		gc.NameSpace+"_"+collectorStatusName,

@@ -14,6 +14,7 @@
 GO     := go
 GOPATH := $(firstword $(subst :, ,$(shell $(GO) env GOPATH)))
 PROMU  := $(GOPATH)/bin/promu
+PASSWD_ENCRYPT := $(GOPATH)/bin/passwd_encrypt
 pkgs    = $(shell $(GO) list ./... | grep -v /vendor/)
 
 PREFIX              ?= $(shell pwd)
@@ -32,69 +33,55 @@ test:
 	@echo ">> running tests"
 	@$(GO) test -short -race $(pkgs)
 
-format:
-	@echo ">> formatting code"
-	@$(GO) fmt $(pkgs)
-
-vet:
-	@echo ">> vetting code"
-	@$(GO) vet $(pkgs)
-
-build-mssql: promu
+build-mssql: promu passwd_encrypt
 	@echo ">> building MSSQL binaries"
-	@$(PROMU) build --prefix $(PREFIX) -v
+	@$(PROMU) build
 
-build-oracledb: promu 
+build-oracledb: promu passwd_encrypt
 	@echo ">> building ORACLE binaries"
-	@. $(PREFIX)/.env_oracle && $(PROMU) build --prefix $(PREFIX) --config=.promu-oracle.yml
+	@$(PROMU) build --config=.promu-oracle.yml
 
-build-db2: promu 
+build-db2: promu passwd_encrypt
 	@echo ">> building DB2 binaries"
-	@. $(PREFIX)/.env_db2 && $(PROMU) build --prefix $(PREFIX) --config=.promu-db2.yml
+	@$(PROMU) build --config=.promu-db2.yml
 
-build-hana: promu 
+build-hanasql: promu passwd_encrypt
 	@echo ">> building HANASQL binaries"
-	@$(PROMU) build --prefix $(PREFIX) --config=.promu-hana.yml
+	@$(PROMU) build --config=.promu-hana.yml
 
-build: build-mssql build-db2 build-hana #build-oracle
+build: build-mssql build-db2 build-hanasql build-oracledb
 
-# tarball-mssql: mssql_exporter
-# 	@echo ">> building mssql release tarball"
-# 	@mv $(BIN_DIR)/contribs/mssql_exporter $(BIN_DIR)/config
-# 	@git remote set-url origin "https://github.com/peekjef72/mssql_exporter.git"
-# 	@$(PROMU) tarball --config=.promu.yml
-# 	@git remote set-url origin "https://github.com/peekjef72/sql_exporter.git"
-# 	@mv $(BIN_DIR)/config $(BIN_DIR)/contribs/mssql_exporter
+# @mv $(BIN_DIR)/contribs/mssql_exporter $(BIN_DIR)/config
+# @cp $(PASSWD_ENCRYPT) $(BIN_DIR)
+# @mv $(BIN_DIR)/cmd/mssql_exporter $(BIN_DIR)
+# @git remote set-url origin "https://github.com/peekjef72/mssql_exporter.git"
+# @$(PROMU) tarball --config=.promu.yml
+# @git remote set-url origin "https://github.com/peekjef72/sql_exporter.git"
+# @mv $(BIN_DIR)/config $(BIN_DIR)/contribs/mssql_exporter
+# @rm $(BIN_DIR)/passwd_encrypt
+# @mv $(BIN_DIR) $(BIN_DIR)/cmd/mssql_exporter 
+tarball-mssql: promu passwd_encrypt build-mssql
+	@echo ">> building mssql release tarball"
+	@$(shell ./build_tarball.sh mssql_exporter)
 
-# tarball-db2: build-db2
-# 	@echo ">> building db2 release tarball"
-# 	@mv $(BIN_DIR)/contribs/db2_exporter $(BIN_DIR)/config
-# 	@git remote set-url origin "https://github.com/peekjef72/db2_exporter.git"
-# 	@$(PROMU) tarball --config=.promu-db2.yml
-# 	@git remote set-url origin "https://github.com/peekjef72/sql_exporter.git"
-# 	@mv $(BIN_DIR)/config $(BIN_DIR)/contribs/db2_exporter
 
-# tarball-oracle:
-# 	@echo ">> building oracledb release tarball"
-# 	@mv $(BIN_DIR)/contribs/oracle_exporter $(BIN_DIR)/config
-# 	@git remote set-url origin "https://github.com/peekjef72/oracledb_exporter.git"
-# 	@$(PROMU) tarball --config=.promu-oracle.yml
-# 	@git remote set-url origin "https://github.com/peekjef72/sql_exporter.git"
-# 	@mv $(BIN_DIR)/config $(BIN_DIR)/contribs/oracledb_exporter
+tarball-db2: promu passwd_encrypt build-db2
+	@echo ">> building db2 release tarball"
+	@$(shell ./build_tarball.sh db2_exporter)
 
-# tarball-hana: build-hana 
-# 	@echo ">> building HANASQL release tarball"
-# 	@mv $(BIN_DIR)/contribs/hanasql_exporter $(BIN_DIR)/config
-# 	@git remote set-url origin "https://github.com/peekjef72/hanasql_exporter.git"
-# 	@$(PROMU) tarball --config=.promu-hana.yml
-# 	@git remote set-url origin "https://github.com/peekjef72/sql_exporter.git"
-# 	@mv $(BIN_DIR)/config $(BIN_DIR)/contribs/hanasql_exporter
+tarball-oracledb: promu passwd_encrypt build-oracledb
+	@echo ">> building oracledb release tarball"
+	@$(shell ./build_tarball.sh oracledb_exporter)
+
+tarball-hanasql: promu passwd_encrypt build-hanasql 
+	@echo ">> building HANASQL release tarball"
+	@$(shell ./build_tarball.sh hanasql_exporter)
 
 # tarball: tarball-mssql tarball-db2 tarball-hana #tarball-oracle
 
-tarball:
+tarball-all: build
 	@echo ">> build release tarball"
-	@$(shell ./build_tarball.sh)
+	@$(shell ./build_tarball.sh all)
 
 docker:
 	@echo ">> building docker image"
@@ -105,5 +92,7 @@ promu:
 		GOARCH=$(subst x86_64,amd64,$(patsubst i%86,386,$(shell uname -m))) \
 		$(GO) install github.com/prometheus/promu@v0.13.0
 
+passwd_encrypt:
+	$(GO) install github.com/peekjef72/passwd_encrypt@latest
 
 .PHONY: all style format build test vet tarball docker promu

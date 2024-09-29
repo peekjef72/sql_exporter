@@ -8,12 +8,11 @@ import (
 	"os/signal"
 	"regexp"
 	"runtime"
+	"strings"
 	"syscall"
 	"time"
 
 	_ "net/http/pprof"
-
-	// "github.com/peekjef72/db2_exporter"
 
 	kingpin "github.com/alecthomas/kingpin/v2"
 	"github.com/go-kit/log/level"
@@ -27,25 +26,17 @@ import (
 	"github.com/prometheus/exporter-toolkit/web/kingpinflag"
 )
 
-const (
-	metricsPublishingPort = ":9399"
-	exporter_name         = "sql_exporter"
-	exporter_namespace    = "sql"
-	configEnvName         = "SQL_CONFIG"
-)
-
 var (
-	// listenAddress = kingpin.Flag("web.listen-address", "The address to listen on for HTTP requests.").Default(metricsPublishingPort).String()
 	metricsPath    = kingpin.Flag("web.telemetry-path", "Path under which to expose collector's internal metrics.").Default("/metrics").String()
 	configFile     = kingpin.Flag("config.file", fmt.Sprintf("%s Exporter configuration file.", exporter_name)).Short('c').Default("config/config.yml").String()
 	debug_flag     = kingpin.Flag("debug", "debug connection checks.").Short('d').Default("false").Bool()
 	dry_run        = kingpin.Flag("dry-run", "check exporter configuration file and try to collect a target then exit.").Short('n').Default("false").Bool()
 	target_name    = kingpin.Flag("target", "In dry-run mode specify the target name, else ignored.").Short('t').String()
+	model_name     = kingpin.Flag("model", "In dry-run mode specify the model name to build the dynamic target, else ignored.").Default("default").Short('m').String()
 	auth_key       = kingpin.Flag("auth_key", "In dry-run mode specify the auth_key to use, else ignored.").Short('a').String()
 	collector_name = kingpin.Flag("collector", "Specify the collector name restriction to collect, replace the collector_names set for each target.").Short('o').String()
 	toolkitFlags   = kingpinflag.AddFlags(kingpin.CommandLine, metricsPublishingPort)
 	logConfig      = promlog.Config{}
-	// alsologtostderr = kingpin.Flag("alsologtostderr", "log to standard error as well as files.").Default("true").Bool()
 )
 
 const (
@@ -72,7 +63,7 @@ func newRoute(op int, path string, handler http.HandlerFunc) *route {
 }
 func BuildHandler(exporter Exporter) http.Handler {
 	var routes = []*route{
-		newRoute(OpEgals, "/healthz", func(w http.ResponseWriter, r *http.Request) { http.Error(w, "OK", http.StatusOK) }),
+		newRoute(OpEgals, "/health", func(w http.ResponseWriter, r *http.Request) { http.Error(w, "OK", http.StatusOK) }),
 		newRoute(OpEgals, "/", HomeHandlerFunc(*metricsPath, exporter)),
 		newRoute(OpEgals, "/status", StatusHandlerFunc(*metricsPath, exporter)),
 		newRoute(OpEgals, "/config", ConfigHandlerFunc(*metricsPath, exporter)),
@@ -100,14 +91,8 @@ func BuildHandler(exporter Exporter) http.Handler {
 				return
 			}
 		}
-		// http.DefaultServeMux.ServeHTTP(w, req)
-		// h, _ := http.DefaultServeMux.Handler(req)
-		// if h != nil {
-		// 			h.ServeHTTP(w, req)
-		// } else {
 		err := fmt.Errorf("not found")
 		HandleError(http.StatusNotFound, err, *metricsPath, exporter, w, req)
-		// }
 	})
 }
 
@@ -144,10 +129,42 @@ func main() {
 	if *dry_run {
 		level.Info(logger).Log("msg", "configuration OK.")
 		// get the target if defined
-		var t Target
-		var err error
+		var (
+			err   error
+			t     Target
+			tmp_t *TargetConfig
+		)
 		if *target_name != "" {
+			*target_name = strings.TrimSpace(*target_name)
 			t, err = exporter.FindTarget(*target_name)
+			if err == ErrTargetNotFound {
+				err = nil
+				if *model_name != "" {
+					*model_name = strings.TrimSpace(*model_name)
+					t_def, err := exporter.FindTarget(*model_name)
+					if err != nil {
+						err := fmt.Errorf("Target model '%s' not found: %s", *model_name, err)
+						level.Error(logger).Log(err.Error())
+						os.Exit(1)
+					}
+					if tmp_t, err = t_def.Config().Clone(*target_name, ""); err != nil {
+						err := fmt.Errorf("invalid url set for remote_target '%s' %s", *target_name, err)
+						level.Error(logger).Log(err.Error())
+						os.Exit(1)
+					}
+					t, err = exporter.AddTarget(tmp_t)
+					if err != nil {
+						err := fmt.Errorf("unable to create temporary target %s", err)
+						level.Error(logger).Log(err.Error())
+						os.Exit(1)
+					}
+					exporter.Config().Targets = append(exporter.Config().Targets, tmp_t)
+				}
+			}
+			if err == ErrTargetNotFound {
+				t, err = exporter.GetFirstTarget()
+			}
+
 		} else {
 			t, err = exporter.GetFirstTarget()
 		}
@@ -181,7 +198,9 @@ func main() {
 		mfs, err := gatherer.Gather()
 		if err != nil {
 			level.Error(logger).Log("errmsg", fmt.Sprintf("Error gathering metrics: %v", err))
-			os.Exit(1)
+			if len(mfs) == 0 {
+				os.Exit(1)
+			}
 		}
 
 		level.Info(logger).Log("msg", "collect is OK. Dumping result to stdout.")
@@ -251,18 +270,4 @@ func main() {
 			os.Exit(1)
 		}
 	}
-
-	// Setup and start webserver.
-	// http.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) { http.Error(w, "OK", http.StatusOK) })
-	// http.HandleFunc("/", HomeHandlerFunc(*metricsPath, exporter))
-	// http.HandleFunc("/config", ConfigHandlerFunc(*metricsPath, exporter))
-	// http.Handle(*metricsPath, ExporterHandlerFor(exporter))
-	// // Expose exporter metrics separately, for debugging purposes.
-	// http.Handle("/mssql_exporter_metrics", promhttp.Handler())
-
-	// level.Info(logger).Log("msg", "Listening on address", "address", *listenAddress)
-	// if err := http.ListenAndServe(*listenAddress, nil); err != nil {
-	// 	level.Error(logger).Log("msg", "Error starting HTTP server")
-	// 	os.Exit(1)
-	// }
 }

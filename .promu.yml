@@ -20,4 +20,4 @@ tarball:
       - LICENSE
       - README.md
       - contribs
-      - cmd
+      - passwd_encrypt

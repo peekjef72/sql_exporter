@@ -8,6 +8,7 @@ build:
           path: .
     flags: -tags netgo,usergo,static,db2
     ldflags: |
+        -L /opt/db2_exporter/lib/clidriver/lib
         -X github.com/prometheus/common/version.Version={{.Version}}
         -X github.com/prometheus/common/version.Revision={{.Revision}}
         -X github.com/prometheus/common/version.Branch={{.Branch}}

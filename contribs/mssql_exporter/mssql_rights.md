@@ -2,8 +2,7 @@
 # MSSQL Rights
 
 The default mssql_standart.collector.yml config file contains SQL queries to these objects:
-* select `SERVERPROPERTY()`: 
-usetAll users can query the server properties.
+* select `SERVERPROPERTY()`: All users can query the server properties.
 
 * `@@MAX_CONNECTIONS` : no right specified
 

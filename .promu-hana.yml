@@ -6,7 +6,7 @@ build:
     binaries:
         - name: cmd/hanasql_exporter
           path: .
-    flags: -tags netgo,users,static,hana
+    flags: -tags hana
     ldflags: |
       -X github.com/prometheus/common/version.Version={{.Version}}
       -X github.com/prometheus/common/version.Revision={{.Revision}}

@@ -212,6 +212,10 @@ collectors:
 		}
 		tnames[t.Name] = nil
 
+		// skip targets with DSN "template"
+		if t.DSN == "template" {
+			continue
+		}
 		if _, ok := dsns[string(t.DSN)]; ok {
 			return fmt.Errorf("duplicate data source definition %q in target %+v", t.Name, t)
 		}

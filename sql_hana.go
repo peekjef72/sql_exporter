@@ -73,53 +73,49 @@ func OpenConnection(
 			}
 		}
 
-		val, ok := params["server"]
+		val, ok := params["user id"]
 		if !ok || val == "" {
-			return nil, fmt.Errorf("server can't be empty")
-		}
-		if auth.Username != "" {
-			params["user id"] = auth.Username
-		} else {
-			val, ok = params["user id"]
-			if !ok || val == "" {
+			if auth.Username != "" {
+				params["user id"] = auth.Username
+			} else {
 				return nil, fmt.Errorf("user Id can't be empty")
 			}
 		}
 
-		if auth.Password != "" {
-			passwd := string(auth.Password)
-			if strings.HasPrefix(passwd, "/encrypted/") {
-				ciphertext := passwd[len("/encrypted/"):]
-				level.Debug(logger).Log(
-					"module", "sql::OpenConnection()",
-					"ciphertext", ciphertext)
-				auth_key := GetMapValueString(symbol_table, "auth_key")
-				level.Debug(logger).Log(
-					"module", "sql::OpenConnection()",
-					"auth_key", auth_key)
-				if auth_key == "" {
-					return nil, fmt.Errorf("password is encrypt and not ciphertext provided (auth_key)")
-				}
-				cipher, err := encrypt.NewAESCipher(auth_key)
-				if err != nil {
-					err := fmt.Errorf("can't obtain cipher to decrypt")
-					// level.Error(c.logger).Log("errmsg", err)
-					return nil, err
-				}
-				passwd, err = cipher.Decrypt(ciphertext, true)
-				if err != nil {
-					err := fmt.Errorf("invalid key provided to decrypt")
-					// level.Error(c.logger).Log("errmsg", err)
-					return nil, err
-				}
-			}
-			params["password"] = passwd
-
-		} else {
-			_, ok = params["password"]
-			if !ok {
+		val, ok = params["password"]
+		if !ok || val == "" {
+			if auth.Password != "" {
+				val = string(auth.Password)
+			} else {
 				return nil, fmt.Errorf("password has to be set")
 			}
+		}
+		passwd := val
+		if strings.HasPrefix(passwd, "/encrypted/") {
+			ciphertext := passwd[len("/encrypted/"):]
+			level.Debug(logger).Log(
+				"module", "sql::OpenConnection()",
+				"ciphertext", ciphertext)
+			auth_key := GetMapValueString(symbol_table, "auth_key")
+			level.Debug(logger).Log(
+				"module", "sql::OpenConnection()",
+				"auth_key", auth_key)
+			if auth_key == "" {
+				return nil, fmt.Errorf("password is encrypt and not ciphertext provided (auth_key)")
+			}
+			cipher, err := encrypt.NewAESCipher(auth_key)
+			if err != nil {
+				err := fmt.Errorf("can't obtain cipher to decrypt")
+				// level.Error(c.logger).Log("errmsg", err)
+				return nil, err
+			}
+			passwd, err = cipher.Decrypt(ciphertext, true)
+			if err != nil {
+				err := fmt.Errorf("invalid key provided to decrypt")
+				// level.Error(c.logger).Log("errmsg", err)
+				return nil, err
+			}
+			params["password"] = passwd
 		}
 
 		// add params to target symbol table

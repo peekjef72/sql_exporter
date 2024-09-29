@@ -27,11 +27,14 @@ metrics when queried more frequently than the configured interval.
 
 ## building
 
-### msuql or hanasql
+### mssql or hanasql
 mssql_exporter and hanasql_exporter can be compiled staticaly.
 ```bash
 make build-mssql build-hana
 ```
+
+pre-requirements:
+ - gcc (installed via your prefered package manager)
 
 ### db2
 

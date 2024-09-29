@@ -21,7 +21,25 @@ import (
 // context is closed (this is actually prevented by `database/sql` implementation), sets connection limits and returns
 // the handle.
 //
-
+// url format "oracle://<hostname>:<port>/<instance>?user%20id=<login>&password=<password>&database=<database>&protocol=...&options="
+//
+// or:
+//
+// INSTANCE=<instance>; DATABASE=<database>; HOSTNAME=<hostname>; PORT=<port>; PROTOCOL=<protocol>; UID=<login>; PWD=<password>;<br>
+//
+// ## parameters synonym => final value
+// * server, hostname => server
+// * uid, user, login => user id
+// * pwd, passwd, password => password
+//
+//	 valid options are:
+//		- loc
+//	 - isolation
+//	 - questionph
+//	 - prefetch_rows
+//	 - prefetch_memory
+//	 - as
+//	 - stmt_cache_size
 func OpenConnection(
 	ctx context.Context,
 	logContext []interface{},
@@ -69,57 +87,65 @@ func OpenConnection(
 			return nil, fmt.Errorf("server can't be empty")
 		}
 
-		if auth.Username != "" {
-			params["user id"] = auth.Username
-		} else {
-			val, ok = params["user id"]
-			if !ok || val == "" {
+		val, ok = params["user id"]
+		if !ok || val == "" {
+			if auth.Username != "" {
+				params["user id"] = auth.Username
+			} else {
 				return nil, fmt.Errorf("user Id can't be empty")
 			}
 		}
 
-		if auth.Password != "" {
-			passwd := string(auth.Password)
-			if strings.HasPrefix(passwd, "/encrypted/") {
-				ciphertext := passwd[len("/encrypted/"):]
-				level.Debug(logger).Log(
-					"module", "sql::OpenConnection()",
-					"ciphertext", ciphertext)
-				auth_key := GetMapValueString(symbol_table, "auth_key")
-				level.Debug(logger).Log(
-					"module", "sql::OpenConnection()",
-					"auth_key", auth_key)
-				if auth_key == "" {
-					return nil, fmt.Errorf("password is encrypt and not ciphertext provided (auth_key)")
-				}
-				cipher, err := encrypt.NewAESCipher(auth_key)
-				if err != nil {
-					err := fmt.Errorf("can't obtain cipher to decrypt")
-					// level.Error(c.logger).Log("errmsg", err)
-					return nil, err
-				}
-				passwd, err = cipher.Decrypt(ciphertext, true)
-				if err != nil {
-					err := fmt.Errorf("invalid key provided to decrypt")
-					// level.Error(c.logger).Log("errmsg", err)
-					return nil, err
-				}
-				params["password"] = passwd
-			}
-
-		} else {
-			_, ok = params["password"]
-			if !ok {
+		val, ok = params["password"]
+		if !ok || val == "" {
+			if auth.Password != "" {
+				val = string(auth.Password)
+			} else {
 				return nil, fmt.Errorf("password has to be set")
 			}
 		}
+		passwd := val
+		if strings.HasPrefix(passwd, "/encrypted/") {
+			ciphertext := passwd[len("/encrypted/"):]
+			level.Debug(logger).Log(
+				"module", "sql::OpenConnection()",
+				"ciphertext", ciphertext)
+			auth_key := GetMapValueString(symbol_table, "auth_key")
+			level.Debug(logger).Log(
+				"module", "sql::OpenConnection()",
+				"auth_key", auth_key)
+			if auth_key == "" {
+				return nil, fmt.Errorf("password is encrypt and not ciphertext provided (auth_key)")
+			}
+			cipher, err := encrypt.NewAESCipher(auth_key)
+			if err != nil {
+				err := fmt.Errorf("can't obtain cipher to decrypt")
+				// level.Error(c.logger).Log("errmsg", err)
+				return nil, err
+			}
+			passwd, err = cipher.Decrypt(ciphertext, true)
+			if err != nil {
+				err := fmt.Errorf("invalid key provided to decrypt")
+				// level.Error(c.logger).Log("errmsg", err)
+				return nil, err
+			}
+			params["password"] = passwd
+		}
 
+		// 2 cases:
+		// a) old format: only instance is specified
+		// b) new for pdbs databases:
+		//		instance and databases is specified
 		val, ok = params["instance"]
 		if !ok || val == "" {
-			return nil, fmt.Errorf("database must be set")
-		} else {
-			params["service name"] = params["instance"]
-			delete(params, "instance")
+			val, ok = params["database"]
+			if !ok || val == "" {
+				return nil, fmt.Errorf("instance must be set")
+			} else {
+				// database is defined but not instance: switch values
+				params["instance"] = params["database"]
+				delete(params, "database")
+			}
 		}
 
 		// oci8.ParseDSN
@@ -174,9 +200,15 @@ func OpenConnection(
 		// END ADDRESS
 		new_dns.WriteString(") ")
 
-		// SID
-		new_dns.WriteString("(CONNECT_DATA = (SID = ")
-		new_dns.WriteString(params["service name"])
+		// SID or SERVICE_NAME
+		new_dns.WriteString("(CONNECT_DATA = (")
+		if _, ok := params["database"]; ok {
+			new_dns.WriteString(" SERVICE_NAME = ")
+			new_dns.WriteString(params["database"])
+		} else {
+			new_dns.WriteString(" SID = ")
+			new_dns.WriteString(params["instance"])
+		}
 		new_dns.WriteString("))")
 
 		// END DESCRIPTION

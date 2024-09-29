@@ -40,7 +40,7 @@ const (
       <body>
         <div class="navbar">
           <div class="navbar-header"><a href="/">Prometheus {{ .ExporterName }}</a></div>
-          <div><a href="/healthz">Health</a></div>
+          <div><a href="/health">Health</a></div>
           <div><a href="{{ .MetricsPath }}">Metrics</a></div>
           <div><a href="/config">Configuration</a></div>
           <div><a href="/targets">Targets</a></div>

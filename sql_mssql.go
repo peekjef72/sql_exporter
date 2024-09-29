@@ -19,35 +19,15 @@ import (
 // context is closed (this is actually prevented by `database/sql` implementation), sets connection limits and returns
 // the handle.
 //
-// Below is the list of supported databases (with built in drivers) and their DSN formats. Unfortunately there is no
-// dynamic way of loading a third party driver library (as e.g. with Java classpaths), so any driver additions require
-// a binary rebuild.
-//
-// # MySQL
-//
-// Using the https://github.com/go-sql-driver/mysql driver, DSN format (passed to the driver stripped of the `mysql://`
-// prefix):
-//
-//	mysql://username:password@protocol(host:port)/dbname?param=value
-//
-// # PostgreSQL
-//
-// Using the https://godoc.org/github.com/lib/pq driver, DSN format (passed through to the driver unchanged):
-//
-//	postgres://username:password@host:port/dbname?param=value
-//
 // # MS SQL Server
 //
 // Using the https://github.com/denisenkom/go-mssqldb driver, DSN format (passed through to the driver unchanged):
 //
-//	sqlserver://username:password@host:port/instance?param=value
-//
-// # Clickhouse
-//
-// Using the https://github.com/kshvakov/clickhouse driver, DSN format (passed to the driver with the`clickhouse://`
-// prefix replaced with `tcp://`):
-//
-//	clickhouse://host:port?username=username&password=password&database=dbname&param=value
+// url format:
+//		sqlserver://username:password@host:port/instance?param=value
+// or DSN format:
+//  	DATABASE=<database>; HOSTNAME=<hostname>; PORT=<port>; PROTOCOL=<protocol>; UID=<login>; PWD=<password>;
+
 func OpenConnection(
 	ctx context.Context,
 	logContext []interface{},
@@ -90,50 +70,51 @@ func OpenConnection(
 			return nil, fmt.Errorf("server can't be empty")
 		}
 
-		if auth.Username != "" {
-			params["user id"] = auth.Username
-		} else {
-			val, ok = params["user id"]
-			if !ok || val == "" {
+		val, ok = params["user id"]
+		if !ok || val == "" {
+			if auth.Username != "" {
+				params["user id"] = auth.Username
+			} else {
 				return nil, fmt.Errorf("user Id can't be empty")
 			}
 		}
 
-		if auth.Password != "" {
-			passwd := string(auth.Password)
-			if strings.HasPrefix(passwd, "/encrypted/") {
-				ciphertext := passwd[len("/encrypted/"):]
-				level.Debug(logger).Log(
-					"module", "sql::OpenConnection()",
-					"ciphertext", ciphertext)
-				auth_key := GetMapValueString(symbol_table, "auth_key")
-				level.Debug(logger).Log(
-					"module", "sql::OpenConnection()",
-					"auth_key", auth_key)
-				if auth_key == "" {
-					return nil, fmt.Errorf("password is encrypt and not ciphertext provided (auth_key)")
-				}
-				cipher, err := encrypt.NewAESCipher(auth_key)
-				if err != nil {
-					err := fmt.Errorf("can't obtain cipher to decrypt")
-					// level.Error(c.logger).Log("errmsg", err)
-					return nil, err
-				}
-				passwd, err = cipher.Decrypt(ciphertext, true)
-				if err != nil {
-					err := fmt.Errorf("invalid key provided to decrypt")
-					// level.Error(c.logger).Log("errmsg", err)
-					return nil, err
-				}
-				params["password"] = passwd
-			}
-
-		} else {
-			_, ok = params["password"]
-			if !ok {
+		val, ok = params["password"]
+		if !ok || val == "" {
+			if auth.Password != "" {
+				val = string(auth.Password)
+			} else {
 				return nil, fmt.Errorf("password has to be set")
 			}
 		}
+		passwd := val
+		if strings.HasPrefix(passwd, "/encrypted/") {
+			ciphertext := passwd[len("/encrypted/"):]
+			level.Debug(logger).Log(
+				"module", "sql::OpenConnection()",
+				"ciphertext", ciphertext)
+			auth_key := GetMapValueString(symbol_table, "auth_key")
+			level.Debug(logger).Log(
+				"module", "sql::OpenConnection()",
+				"auth_key", auth_key)
+			if auth_key == "" {
+				return nil, fmt.Errorf("password is encrypt and not ciphertext provided (auth_key)")
+			}
+			cipher, err := encrypt.NewAESCipher(auth_key)
+			if err != nil {
+				err := fmt.Errorf("can't obtain cipher to decrypt")
+				// level.Error(c.logger).Log("errmsg", err)
+				return nil, err
+			}
+			passwd, err = cipher.Decrypt(ciphertext, true)
+			if err != nil {
+				err := fmt.Errorf("invalid key provided to decrypt")
+				// level.Error(c.logger).Log("errmsg", err)
+				return nil, err
+			}
+			params["password"] = passwd
+		}
+
 		// val, ok = params["database"]
 		// if !ok || val == "" {
 		// 	return nil, fmt.Errorf("database must be set")
