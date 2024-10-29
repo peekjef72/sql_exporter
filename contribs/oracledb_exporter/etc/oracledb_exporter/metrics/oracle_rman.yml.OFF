@@ -1,0 +1,16 @@
+collector_name: oracle_rman
+# namespace: oracledb
+metrics:
+  #backup incrementale
+  - metric_name:
+    query: SELECT SESSION_KEY,
+        INPUT_TYPE,
+        START_TIME,
+        END_TIME,
+        OUTPUT_DEVICE_TYPE,
+        round((ELAPSED_SECONDS/3600),1) delay_hour,
+        round(OUTPUT_BYTES/1024/1024/1024) out_size
+      FROM   V$RMAN_BACKUP_JOB_DETAILS
+      where START_TIME > sysdate - 25
+        and INPUT_TYPE = 'DB INCR'
+      ORDER BY SESSION_KEY; 

@@ -1,17 +1,13 @@
-//go:build db2 && !hana && !mssql && !oracle && !postgres
+//go:build db2 && !hana && !mssql && !oracle
 
 package main
 
 import (
-	"context"
-	"database/sql"
 	"fmt"
+	"log/slog"
 	"strings"
 
-	"github.com/go-kit/log"
-	"github.com/go-kit/log/level"
 	_ "github.com/ibmdb/go_ibm_db" // register the DB2 driver
-	"github.com/peekjef72/passwd_encrypt/encrypt"
 )
 
 // OpenConnection extracts the driver name from the DSN (expected as the URI scheme), adjusts it where necessary (e.g.
@@ -28,14 +24,12 @@ import (
 // DSN format!
 // 		DATABASE=<database>; HOSTNAME=<hostname>; PORT=<port>; PROTOCOL=<protocol>; UID=<login>; PWD=<password>;
 
-func OpenConnection(
-	ctx context.Context,
-	logContext []interface{},
-	logger log.Logger,
+func BuildConnection(
+	logger *slog.Logger,
 	dsn string,
 	auth AuthConfig,
-	maxConns, maxIdleConns int,
-	symbol_table map[string]interface{}) (*sql.DB, error) {
+	symbol_table map[string]interface{}) (string, error) {
+
 	var driver string
 
 	// Extract driver name from DSN.
@@ -56,13 +50,13 @@ func OpenConnection(
 			// "db2://<hostname>:<port>?user%20id=<login>&password=<password>&database=<database>&protocol=..."
 			params, err = splitConnectionStringURL(dsn)
 			if err != nil {
-				return nil, err
+				return "", err
 			}
 		} else {
 			// DATABASE=<database>; HOSTNAME=<hostname>; PORT=<port>; PROTOCOL=<protocol>; UID=<login>; PWD=<password>;
 			params, err = splitRawConnectionStringDSN(dsn)
 			if err != nil {
-				return nil, err
+				return "", err
 			}
 		}
 
@@ -71,7 +65,7 @@ func OpenConnection(
 			if auth.Username != "" {
 				params["user id"] = auth.Username
 			} else {
-				return nil, fmt.Errorf("user Id can't be empty")
+				return "", fmt.Errorf("user Id can't be empty")
 			}
 		}
 
@@ -80,47 +74,31 @@ func OpenConnection(
 			if auth.Password != "" {
 				val = string(auth.Password)
 			} else {
-				return nil, fmt.Errorf("password has to be set")
+				return "", fmt.Errorf("password has to be set")
 			}
 		}
 		passwd := val
 		if strings.HasPrefix(passwd, "/encrypted/") {
-			ciphertext := passwd[len("/encrypted/"):]
-			level.Debug(logger).Log(
-				"module", "sql::OpenConnection()",
-				"ciphertext", ciphertext)
-			auth_key := GetMapValueString(symbol_table, "auth_key")
-			level.Debug(logger).Log(
-				"module", "sql::OpenConnection()",
-				"auth_key", auth_key)
-			if auth_key == "" {
-				return nil, fmt.Errorf("password is encrypt and not ciphertext provided (auth_key)")
+			if val, auth_key, err := BuildPasswd(logger, passwd, symbol_table); err == nil {
+				params["password"] = val
+				params["auth_key"] = auth_key
 			}
-			cipher, err := encrypt.NewAESCipher(auth_key)
-			if err != nil {
-				err := fmt.Errorf("can't obtain cipher to decrypt")
-				// level.Error(c.logger).Log("errmsg", err)
-				return nil, err
-			}
-			passwd, err = cipher.Decrypt(ciphertext, true)
-			if err != nil {
-				err := fmt.Errorf("invalid key provided to decrypt")
-				// level.Error(c.logger).Log("errmsg", err)
-				return nil, err
-			}
-			params["password"] = passwd
+			params["need_auth_key"] = "true"
+		} else {
+			params["password"] = val
+			params["need_auth_key"] = "false"
 		}
 
 		val, ok = params["database"]
 		if !ok || val == "" {
-			return nil, fmt.Errorf("database must be set")
+			return "", fmt.Errorf("database must be set")
 		}
 		if params["port"] == "" {
 			params["port"] = "60000"
 		}
 
 		if params["protocol"] == "" {
-			params["protocol"] = "TCP"
+			params["protocol"] = "TCPIP"
 		}
 
 		// remove instance from url if any has been specified
@@ -129,38 +107,72 @@ func OpenConnection(
 		// add params to target symbol table
 		symbol_table["params"] = params
 
-		driver = "go_ibm_db"
+		// driver = "go_ibm_db"
 	default:
-		return nil, fmt.Errorf("driver '%s' not supported", driver)
+		return "", fmt.Errorf("driver '%s' not supported", driver)
 	}
 
 	// rebuild dsn from params because params may have changed
-	dsn = GenDSN(params)
+	// dsn = genDSN(params)
+	// // WARNING: display password in clear text in log !!!
+	// logger.Debug(fmt.Sprintf("private dsn='%s", dsn))
+	// return dsn, nil
+	return genDSN(params), nil
+}
 
-	// Open the DB handle in a separate goroutine so we can terminate early if the context closes.
-	var (
-		conn *sql.DB
-		err  error
-		ch   = make(chan error)
-	)
-	go func() {
-		conn, err = sql.Open(driver, dsn)
-		close(ch)
-	}()
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case <-ch:
-		if err != nil {
-			return nil, err
-		}
+// generate DSN string from parameter map
+func genDSN(params map[string]string) string {
+
+	new_dns := new(strings.Builder)
+	// Hostname
+	new_dns.WriteString("HOSTNAME=")
+	new_dns.WriteString(params["server"])
+	new_dns.WriteString("; ")
+
+	// Port
+	if params["port"] != "" {
+		new_dns.WriteString("PORT=")
+		new_dns.WriteString(params["port"])
+		new_dns.WriteString("; ")
 	}
 
-	conn.SetMaxIdleConns(maxIdleConns)
-	conn.SetMaxOpenConns(maxConns)
+	// Database
+	new_dns.WriteString("DATABASE=")
+	new_dns.WriteString(params["database"])
+	new_dns.WriteString("; ")
 
-	logContext = append(logContext, "msg", fmt.Sprintf("Database handle successfully opened with driver %s.", driver))
-	level.Debug(logger).Log(logContext...)
+	// Protocol
+	if params["protocol"] != "" {
+		new_dns.WriteString("PROTOCOL=")
+		new_dns.WriteString(params["protocol"])
+		new_dns.WriteString("; ")
+	}
 
-	return conn, nil
+	// user
+	new_dns.WriteString("UID=")
+	new_dns.WriteString(params["user id"])
+	new_dns.WriteString("; ")
+
+	// password
+	new_dns.WriteString("PWD=")
+	new_dns.WriteString(params["password"])
+	new_dns.WriteString("; ")
+
+	return new_dns.String()
+}
+
+// Check if db2 server returns an error message indicating
+// that something is wrong with password or login so that cnx is reset
+// and the next call, tries to recompute the login/passwd only if auth_key has changed.
+//
+// "ORA-01005: null password given; logon denied\n"
+//
+// "ORA-01017: invalid username/password; logon denied\n
+func check_login_error(err error) bool {
+	check := false
+	if strings.HasPrefix(err.Error(), "ORA-01005") ||
+		strings.HasPrefix(err.Error(), "ORA-01017") {
+		check = true
+	}
+	return check
 }

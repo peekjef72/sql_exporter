@@ -1,4 +1,4 @@
-//go:build db2 && !hana && !mssql && !oracle && !postgres
+//go:build db2 && !hana && !mssql && !oracle
 
 package main
 
@@ -10,4 +10,5 @@ const (
 	metricsPublishingPort = ":9161"
 	exporter_name         = "db2_exporter"
 	configEnvName         = "DB2_CONFIG"
+	driver_name           = "go_ibm_db"
 )

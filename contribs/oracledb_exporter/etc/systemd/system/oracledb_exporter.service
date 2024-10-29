@@ -1,0 +1,25 @@
+[Unit]
+Description=Metrics collector for Oracle databases
+Wants=network-online.target
+After=network-online.target
+StartLimitBurst=3
+StartLimitIntervalSec=150
+
+[Service]
+User=oracle_exporter
+Group=oracle_exporter
+Environment=LD_LIBRARY_PATH=/usr/lib/oracle/19.23/client64/lib
+WorkingDirectory=/opt/oracledb_exporter
+Restart=always
+RestartSec=2
+Type=simple
+
+ExecStart=/opt/oracledb_exporter/oracledb_exporter \
+        --log.level=info \
+        --config.file=/etc/oracledb_exporter/oracledb_exporter.yml \
+        --web.listen-address=:9161
+
+ExecReload=/bin/kill -HUP $MAINPID
+
+[Install]
+WantedBy=multi-user.target

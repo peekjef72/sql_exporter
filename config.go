@@ -88,8 +88,24 @@ func (c *Config) UnmarshalYAML(unmarshal func(interface{}) error) error {
 		if coll.MinInterval < 0 {
 			coll.MinInterval = c.Globals.MinInterval
 		}
-		if _, found := colls[coll.Name]; found {
-			return fmt.Errorf("duplicate collector name: %s", coll.Name)
+		if found_cc, found := colls[coll.Name]; found {
+			var (
+				err                      error
+				found_f_name, dup_f_name string
+			)
+
+			if coll.fromFile != "" {
+				dup_f_name = coll.fromFile
+				if found_cc.fromFile != "" {
+					found_f_name = found_cc.fromFile
+				} else {
+					found_f_name = "core config file"
+				}
+				err = fmt.Errorf("duplicate collector name: %s in %s first is %s", coll.Name, found_f_name, dup_f_name)
+			} else {
+				err = fmt.Errorf("duplicate collector name: %s", coll.Name)
+			}
+			return err
 		}
 		colls[coll.Name] = coll
 
@@ -302,6 +318,7 @@ func (c *Config) loadCollectorFiles() error {
 			if err != nil {
 				return err
 			}
+			cc.fromFile = cf
 			c.Collectors = append(c.Collectors, &cc)
 			c.logger.Info(fmt.Sprintf("Loaded collector %q from %s", cc.Name, cf))
 		}
@@ -391,15 +408,17 @@ func (g *GlobalConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	return checkOverflow(g.XXX, "global")
 }
 
-//
 // Targets
-//
+const (
+	TargetTypeStatic  = iota
+	TargetTypeDynamic = iota
+)
 
 // TargetConfig defines a DSN and a set of collectors to be executed on it.
 type TargetConfig struct {
 	Name          string            `yaml:"name" json:"name"`                                       // data source name to connect to
 	DSN           Secret            `yaml:"data_source_name" json:"data_source_name"`               // data source definition to connect to
-	Dsn           string            `yaml:"dsn" json:"dsn"`                                         // data source definition to connect to, synonym to data_source_name
+	Dsn           string            `yaml:"dsn,omitempty" json:"dsn,omitempty"`                     // data source definition to connect to, synonym to data_source_name
 	ScrapeTimeout model.Duration    `yaml:"scrape_timeout" json:"scrape_timeout"`                   // per-scrape timeout, global
 	Labels        map[string]string `yaml:"labels,omitempty" json:"labels,omitempty"`               // labels to apply to all metrics collected from the targets
 	CollectorRefs []string          `yaml:"collectors" json:"collectors"`                           // names of collectors to execute on the target
@@ -409,6 +428,7 @@ type TargetConfig struct {
 
 	collectors []*CollectorConfig // resolved collector references
 	fromFile   string             // filepath if loaded from targets_files pattern
+	targetType int
 
 	// Catches all undefined fields and must be empty after parsing.
 	XXX map[string]interface{} `yaml:",inline" json:"-"`
@@ -427,6 +447,7 @@ func (t *TargetConfig) setFromFile(file_path string) {
 // UnmarshalYAML implements the yaml.Unmarshaler interface for TargetConfig.
 func (t *TargetConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	type plain TargetConfig
+	t.targetType = TargetTypeStatic
 	if err := unmarshal((*plain)(t)); err != nil {
 		return err
 	}
@@ -461,6 +482,47 @@ func (t *TargetConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 		}
 	}
 	return checkOverflow(t.XXX, "target")
+}
+
+type dumpTargetConfig struct {
+	Name          string            `yaml:"name" json:"name"`                                       // data source name to connect to
+	DSN           string            `yaml:"data_source_name" json:"data_source_name"`               // data source definition to connect to
+	ScrapeTimeout model.Duration    `yaml:"scrape_timeout" json:"scrape_timeout"`                   // per-scrape timeout, global
+	Labels        map[string]string `yaml:"labels,omitempty" json:"labels,omitempty"`               // labels to apply to all metrics collected from the targets
+	CollectorRefs []string          `yaml:"collectors" json:"collectors"`                           // names of collectors to execute on the target
+	TargetsFiles  []string          `yaml:"targets_files,omitempty" json:"targets_files,omitempty"` // slice of path and pattern for files that contains targets
+	AuthName      string            `yaml:"auth_name,omitempty" json:"auth_name,omitempty"`
+	AuthConfig    AuthConfig        `yaml:"auth_config,omitempty" json:"auth_config,omitempty"`
+}
+
+func (t *TargetConfig) buildDumpTargetconfig() *dumpTargetConfig {
+	dsn := string(t.DSN)
+	if strings.Contains(dsn, "password=") {
+		pat := regexp.MustCompile(`password\s*=\s*(?P<pass>[^&; ]+)`)
+		matches := pat.FindStringSubmatch(dsn)
+		if len(matches) > 0 {
+			password := matches[0]
+			dsn = strings.Replace(dsn, password, "password=<secret>", 1)
+		}
+	}
+	// if target is dynamic, the name may contain password too.
+	// so use offuscated dsn as name
+	// it can't be done one time for all because name is used to identifed target with sent params
+	// so name must be kept untouch
+	name := t.Name
+	if t.targetType == TargetTypeDynamic {
+		name = dsn
+	}
+	return &dumpTargetConfig{
+		Name:          name,
+		DSN:           dsn,
+		ScrapeTimeout: t.ScrapeTimeout,
+		Labels:        t.Labels,
+		CollectorRefs: t.CollectorRefs,
+		TargetsFiles:  t.TargetsFiles,
+		AuthName:      t.AuthName,
+		AuthConfig:    t.AuthConfig,
+	}
 }
 
 // checkLabelCollisions checks for label collisions between StaticConfig labels and Metric labels.
@@ -545,7 +607,8 @@ type CollectorConfig struct {
 	Queries     []*QueryConfig  `yaml:"queries,omitempty" json:"queries,omitempty"`           // named queries defined by this collector
 
 	// Catches all undefined fields and must be empty after parsing.
-	XXX map[string]interface{} `yaml:",inline" json:"-"`
+	XXX      map[string]interface{} `yaml:",inline" json:"-"`
+	fromFile string
 }
 
 // UnmarshalYAML implements the yaml.Unmarshaler interface for CollectorConfig.
@@ -733,7 +796,21 @@ func (s *Secret) UnmarshalYAML(unmarshal func(interface{}) error) error {
 // MarshalYAML implements the yaml.Marshaler interface for Secrets.
 func (s Secret) MarshalYAML() (interface{}, error) {
 	if s != "" {
+		if strings.Contains(string(s), "/encrypted/") {
+			return string(s), nil
+		}
 		return "<secret>", nil
+	}
+	return nil, nil
+}
+
+// MarshalYAML implements the yaml.Marshaler interface for Secrets.
+func (s Secret) MarshalJSON() ([]byte, error) {
+	if s != "" {
+		if strings.Contains(string(s), "/encrypted/") {
+			return []byte(`"` + s + `"`), nil
+		}
+		return []byte("\"<secret>\""), nil
 	}
 	return nil, nil
 }

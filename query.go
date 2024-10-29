@@ -175,7 +175,10 @@ func (q *Query) run(
 	conn *sql.DB,
 	symbols_table map[string]interface{}) (*sql.Rows, error) {
 	if q.conn != nil && q.conn != conn {
-		panic(fmt.Sprintf("[%s] Expecting to always run on the same database handle", q.logContext))
+		q.conn = nil
+		q.stmt.Close()
+		q.stmt = nil
+		//		panic(fmt.Sprintf("[%s] Expecting to always run on the same database handle", q.logContext))
 	}
 
 	if q.stmt == nil {

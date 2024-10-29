@@ -62,6 +62,7 @@ func ExporterHandlerFor(exporter Exporter) http.Handler {
 				HandleError(http.StatusInternalServerError, err, *metricsPath, exporter, w, req)
 				return
 			}
+			tmp_t.targetType = TargetTypeDynamic
 			target, err = exporter.AddTarget(tmp_t)
 			if err != nil {
 				err := fmt.Errorf("unable to create temporary target %s", err)
@@ -89,6 +90,13 @@ func ExporterHandlerFor(exporter Exporter) http.Handler {
 		auth_key := params.Get("auth_key")
 		if auth_key != "" {
 			target.SetSymbol("auth_key", auth_key)
+		} else {
+			target.DeleteSymbol("auth_key")
+		}
+		health_only := false
+		health_only_str := params.Get("health")
+		if strings.ToLower(health_only_str) == "true" {
+			health_only = true
 		}
 		ctx, cancel := contextFor(req, exporter, target)
 		defer func() {
@@ -96,7 +104,7 @@ func ExporterHandlerFor(exporter Exporter) http.Handler {
 		}()
 
 		// Go through prometheus.Gatherers to sanitize and sort metrics.
-		gatherer := prometheus.Gatherers{exporter.WithContext(ctx, target)}
+		gatherer := prometheus.Gatherers{exporter.WithContext(ctx, target, health_only)}
 		mfs, err := gatherer.Gather()
 		if err != nil {
 			exporter.Logger().Error(
@@ -168,14 +176,12 @@ func contextFor(req *http.Request, exporter Exporter, target Target) (context.Co
 	}
 
 	if timeout <= 0 {
-		target.SetDeadline(time.Time{})
 		return context.Background(), func() {}
 	}
 	exporter.Logger().Debug(
 		fmt.Sprintf("launching exporter.Gather() with timeout `%s`", timeout))
-	target.SetDeadline(time.Now().Add(timeout))
 
-	return context.WithDeadline(context.Background(), target.GetDeadline())
+	return context.WithTimeout(context.Background(), timeout)
 	// return context.WithTimeout(context.Background(), timeout)
 }
 

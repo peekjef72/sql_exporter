@@ -36,7 +36,7 @@ var (
 	auth_key       = kingpin.Flag("auth_key", "In dry-run mode specify the auth_key to use, else ignored.").Short('a').String()
 	collector_name = kingpin.Flag("collector", "Specify the collector name restriction to collect, replace the collector_names set for each target.").Short('o').String()
 	toolkitFlags   = kingpinflag.AddFlags(kingpin.CommandLine, metricsPublishingPort)
-	logConfig      = promslog.Config{}
+	logConfig      = promslog.Config{Style: promslog.GoKitStyle}
 )
 
 const (
@@ -83,11 +83,11 @@ func BuildHandler(exporter Exporter, actionCh chan<- actionMsg) http.Handler {
 	var routes = []*route{
 		newRoute(OpEgals, "/", HomeHandlerFunc(*metricsPath, exporter)),
 		newRoute(OpEgals, "/config", ConfigHandlerFunc(*metricsPath, exporter)),
-		newRoute(OpEgals, "/health", func(w http.ResponseWriter, r *http.Request) { http.Error(w, "OK", http.StatusOK) }),
+		newRoute(OpEgals, "/health", HealthHandlerfunc(*metricsPath, exporter)),
 		newRoute(OpMatch, "/loglevel(?:/(.*))?", LogLevelHandlerFunc(*metricsPath, exporter, actionCh, "")),
 		newRoute(OpEgals, "/reload", ReloadHandlerFunc(*metricsPath, exporter, actionCh)),
 		newRoute(OpEgals, "/status", StatusHandlerFunc(*metricsPath, exporter)),
-		newRoute(OpEgals, "/targets", TargetsHandlerFunc(*metricsPath, exporter)),
+		newRoute(OpMatch, "/targets(?:/(.*))?", TargetsHandlerFunc(*metricsPath, exporter)),
 		newRoute(OpEgals, *metricsPath, func(w http.ResponseWriter, r *http.Request) { ExporterHandlerFor(exporter).ServeHTTP(w, r) }),
 		// Expose exporter metrics separately, for debugging purposes.
 		newRoute(OpEgals, "/sql_exporter_metrics", func(w http.ResponseWriter, r *http.Request) { promhttp.Handler().ServeHTTP(w, r) }),
@@ -246,7 +246,7 @@ func main() {
 		}
 		defer cancel()
 
-		gatherer := prometheus.Gatherers{exporter.WithContext(ctx, t)}
+		gatherer := prometheus.Gatherers{exporter.WithContext(ctx, t, false)}
 		mfs, err := gatherer.Gather()
 		if err != nil {
 			logger.Error(fmt.Sprintf("Error gathering metrics: %v", err))

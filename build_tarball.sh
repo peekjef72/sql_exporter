@@ -6,7 +6,7 @@ if [ "$all" == "all" ]; then
     ARCH_NAME=$(basename `git rev-parse --show-toplevel`)
 else
     ARCH_NAME=${all}
-    echo "arch ${ARCH_NAME}" > /tmp/build_tarball.log
+    # echo "arch ${ARCH_NAME}" > /tmp/build_tarball.log
 fi
 
 VERSION=$(tr -d '\n' <VERSION)
@@ -25,7 +25,9 @@ else
     cp -p cmd/${ARCH_NAME} ${FILE}/
 fi
 cp -p ${GOBIN}/passwd_encrypt ${FILE}/
-cp -pr contribs ${FILE}/
+
+mkdir -p ${FILE}/contribs/${ARCH_NAME}
+cp -pr contribs/${ARCH_NAME}/etc ${FILE}/contribs/${ARCH_NAME}
 
 tar czf "${FILE}.tar.gz" ${FILE}
 

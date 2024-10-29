@@ -1,18 +1,14 @@
-//go:build !db2 && hana && !mssql && !oracle && !postgres
+//go:build !db2 && hana && !mssql && !oracle
 
 package main
 
 import (
-	"context"
-	"database/sql"
 	"fmt"
 	"log/slog"
 	"net/url"
 	"strings"
 
 	_ "github.com/SAP/go-hdb/driver" // register the sap hana driver
-
-	"github.com/peekjef72/passwd_encrypt/encrypt"
 )
 
 // OpenConnection extracts the driver name from the DSN (expected as the URI scheme), adjusts it where necessary (e.g.
@@ -36,14 +32,11 @@ import (
 // * TLSRootCAFile=<>
 // * TLSServerName=<>
 // * TLSInsecureSkipVerify=<>
-func OpenConnection(
-	ctx context.Context,
-	logContext []interface{},
+func BuildConnection(
 	logger *slog.Logger,
 	dsn string,
 	auth AuthConfig,
-	maxConns, maxIdleConns int,
-	symbol_table map[string]interface{}) (*sql.DB, error) {
+	symbol_table map[string]interface{}) (string, error) {
 
 	var driver string
 	// Extract driver name from DSN.
@@ -63,13 +56,13 @@ func OpenConnection(
 			// "db2://<hostname>:<port>?user%20id=<login>&password=<password>&database=<database>&protocol=..."
 			params, err = splitConnectionStringURL(dsn)
 			if err != nil {
-				return nil, err
+				return "", err
 			}
 		} else {
 			// DATABASE=<database>; HOSTNAME=<hostname>; PORT=<port>; PROTOCOL=<protocol>; UID=<login>; PWD=<password>;
 			params, err = splitRawConnectionStringDSN(dsn)
 			if err != nil {
-				return nil, err
+				return "", err
 			}
 		}
 
@@ -78,7 +71,7 @@ func OpenConnection(
 			if auth.Username != "" {
 				params["user id"] = auth.Username
 			} else {
-				return nil, fmt.Errorf("user Id can't be empty")
+				return "", fmt.Errorf("user Id can't be empty")
 			}
 		}
 
@@ -87,77 +80,34 @@ func OpenConnection(
 			if auth.Password != "" {
 				val = string(auth.Password)
 			} else {
-				return nil, fmt.Errorf("password has to be set")
+				return "", fmt.Errorf("password has to be set")
 			}
 		}
 		passwd := val
 		if strings.HasPrefix(passwd, "/encrypted/") {
-			ciphertext := passwd[len("/encrypted/"):]
-			logger.Debug("debug ciphertext",
-				"ciphertext", ciphertext)
-			auth_key := GetMapValueString(symbol_table, "auth_key")
-			logger.Debug(
-				"debug authkey",
-				"auth_key", auth_key)
-			if auth_key == "" {
-				return nil, fmt.Errorf("password is encrypt and not ciphertext provided (auth_key)")
+			if val, auth_key, err := BuildPasswd(logger, passwd, symbol_table); err == nil {
+				params["password"] = val
+				params["auth_key"] = auth_key
 			}
-			cipher, err := encrypt.NewAESCipher(auth_key)
-			if err != nil {
-				err := fmt.Errorf("can't obtain cipher to decrypt")
-				// level.Error(c.logger).Log("errmsg", err)
-				return nil, err
-			}
-			passwd, err = cipher.Decrypt(ciphertext, true)
-			if err != nil {
-				err := fmt.Errorf("invalid key provided to decrypt")
-				// level.Error(c.logger).Log("errmsg", err)
-				return nil, err
-			}
-			params["password"] = passwd
+			params["need_auth_key"] = "true"
+		} else {
+			params["password"] = val
+			params["need_auth_key"] = "false"
 		}
 
 		// add params to target symbol table
 		symbol_table["params"] = params
 
 	default:
-		return nil, fmt.Errorf("driver '%s' not supported", driver)
+		return "", fmt.Errorf("driver '%s' not supported", driver)
 	}
 
 	// rebuild dsn from params because params may have changed
-	dsn = GenDSNUrlHana(driver, params)
-
-	// Open the DB handle in a separate goroutine so we can terminate early if the context closes.
-	var (
-		conn *sql.DB
-		err  error
-		ch   = make(chan error)
-	)
-	go func() {
-		conn, err = sql.Open(driver, dsn)
-		close(ch)
-	}()
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case <-ch:
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	conn.SetMaxIdleConns(maxIdleConns)
-	conn.SetMaxOpenConns(maxConns)
-
-	logContext = append(logContext, "msg", fmt.Sprintf("Database handle successfully opened with driver %s.", driver))
-	logger.Debug("msg_stack",
-		logContext...)
-
-	return conn, nil
+	return genDSNUrlHana(driver, params), nil
 }
 
 // generate DSN string in url format from parameters map
-func GenDSNUrlHana(driver string, params map[string]string) string {
+func genDSNUrlHana(driver string, params map[string]string) string {
 
 	new_dns := new(strings.Builder)
 
@@ -210,4 +160,20 @@ func GenDSNUrlHana(driver string, params map[string]string) string {
 	}
 
 	return new_dns.String()
+}
+
+// Check if hanasql server returns an error message indicating
+// that something is wrong with password or login so that cnx is reset
+// and the next call, tries to recompute the login/passwd only if auth_key has changed.
+//
+// "ORA-01005: null password given; logon denied\n"
+//
+// "ORA-01017: invalid username/password; logon denied\n
+func check_login_error(err error) bool {
+	check := false
+	if strings.HasPrefix(err.Error(), "ORA-01005") ||
+		strings.HasPrefix(err.Error(), "ORA-01017") {
+		check = true
+	}
+	return check
 }

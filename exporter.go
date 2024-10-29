@@ -26,7 +26,7 @@ type Exporter interface {
 	prometheus.Gatherer
 
 	// WithContext returns a (single use) copy of the Exporter, which will use the provided context for Gather() calls.
-	WithContext(context.Context, Target) Exporter
+	WithContext(context.Context, Target, bool) Exporter
 	// Config returns the Exporter's underlying Config object.
 	Config() *Config
 	Targets() []Target
@@ -56,6 +56,7 @@ type exporter struct {
 	start_time    string
 	reload_time   string
 	logLevel      string
+	health_only   bool
 	content_mutex *sync.Mutex
 }
 
@@ -105,11 +106,12 @@ func NewExporter(configFile string, logger *slog.Logger, collectorName string) (
 	}, nil
 }
 
-func (e *exporter) WithContext(ctx context.Context, t Target) Exporter {
+func (e *exporter) WithContext(ctx context.Context, t Target, health_only bool) Exporter {
 	return &exporter{
 		config:        e.config,
 		targets:       e.targets,
 		cur_target:    t,
+		health_only:   health_only,
 		ctx:           ctx,
 		logger:        e.logger,
 		content_mutex: e.content_mutex,
@@ -128,7 +130,7 @@ func (e *exporter) Gather() ([]*dto.MetricFamily, error) {
 	wg.Add(1)
 	go func(target Target) {
 		defer wg.Done()
-		target.Collect(e.ctx, metricChan)
+		target.Collect(e.ctx, metricChan, e.health_only)
 	}(e.cur_target)
 
 	// Wait for all collectors to complete, then close the channel.
@@ -202,6 +204,7 @@ func (e *exporter) FindTarget(tname string) (Target, error) {
 		if tname == t.Name() {
 			t_found = t
 			found = true
+			break
 		}
 	}
 	if !found {
@@ -229,10 +232,22 @@ func (e *exporter) AddTarget(tg_config *TargetConfig) (Target, error) {
 // GetFirstTarget implements Exporter.
 func (e *exporter) GetFirstTarget() (Target, error) {
 	var t_found Target
+	found := false
+
 	if len(e.targets) == 0 {
 		return t_found, fmt.Errorf("no target found")
 	} else {
-		t_found = e.targets[0]
+		for _, t := range e.targets {
+			if t.Config().DSN != "template" {
+				t_found = t
+				found = true
+				break
+			}
+		}
+		if !found {
+			return t_found, ErrTargetNotFound
+		}
+
 	}
 	return t_found, nil
 }
@@ -357,6 +372,10 @@ func (e *exporter) ReloadConfig() error {
 
 	e.content_mutex.Lock()
 	e.config = c
+	old_targets := e.targets
+	for _, t := range old_targets {
+		t.CloseCnx()
+	}
 	e.targets = targets
 	e.SetReloadTime(time.Now())
 	e.content_mutex.Unlock()

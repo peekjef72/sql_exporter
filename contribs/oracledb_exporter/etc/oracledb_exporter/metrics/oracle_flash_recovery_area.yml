@@ -1,0 +1,19 @@
+collector_name: oracle_fra
+# namespace: oracledb
+metrics:
+  - metric_name: recovery
+    help: "Gauge metric with percentage usage of FRA (v$recovery_file_dest)."
+    type: gauge
+    value_label: type
+    values:
+      - percent_space_used
+      - percent_space_reclaimable
+    query_ref: fra_recovery
+
+queries:
+  - query_name: fra_recovery
+    query: |
+      SELECT sum(percent_space_used) percent_space_used,
+        sum(percent_space_reclaimable) percent_space_reclaimable
+      from V$FLASH_RECOVERY_AREA_USAGE
+

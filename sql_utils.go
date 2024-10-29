@@ -4,10 +4,50 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/url"
 	"strings"
+
+	"github.com/peekjef72/passwd_encrypt/encrypt"
 )
+
+func OpenConnection(
+	ctx context.Context,
+	logContext []interface{},
+	logger *slog.Logger,
+	driver string,
+	dsn string,
+	maxConns, maxIdleConns int,
+) (*sql.DB, error) {
+
+	// Open the DB handle in a separate goroutine so we can terminate early if the context closes.
+	var (
+		conn *sql.DB
+		err  error
+		ch   = make(chan error)
+	)
+	go func() {
+		conn, err = sql.Open(driver, dsn)
+		close(ch)
+	}()
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-ch:
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	conn.SetMaxIdleConns(maxIdleConns)
+	conn.SetMaxOpenConns(maxConns)
+
+	logContext = append(logContext, "msg", fmt.Sprintf("Database handle successfully opened with driver %s.", driver))
+	logger.Debug("msg_stack",
+		logContext...)
+	return conn, nil
+}
 
 // PingDB is a wrapper around sql.DB.PingContext() that terminates as soon as the context is closed.
 //
@@ -127,84 +167,90 @@ func GetMapValueString(symtab map[string]any, key string) string {
 	return value
 }
 
-// generate DSN string from parameter map
-func GenDSN(params map[string]string) string {
+// extract key from symbol table returning a value cast to desired type
+func GetMapValueMap(symtab map[string]any, key string) map[string]any {
+	var wanted_map map[string]any
 
-	new_dns := new(strings.Builder)
-	// Hostname
-	new_dns.WriteString("HOSTNAME=")
-	new_dns.WriteString(params["server"])
-	new_dns.WriteString("; ")
-
-	// Port
-	if params["port"] != "" {
-		new_dns.WriteString("PORT=")
-		new_dns.WriteString(params["port"])
-		new_dns.WriteString("; ")
+	if value_raw, ok := symtab[key]; ok {
+		switch value_val := value_raw.(type) {
+		case map[string]any:
+			wanted_map = value_val
+		case map[string]string:
+			wanted_map = make(map[string]any, len(value_val))
+			for key, val := range value_val {
+				wanted_map[key] = val
+			}
+		default:
+		}
 	}
-
-	// Database
-	new_dns.WriteString("DATABASE=")
-	new_dns.WriteString(params["database"])
-	new_dns.WriteString("; ")
-
-	// Protocol
-	if params["protocol"] != "" {
-		new_dns.WriteString("PROTOCOL=")
-		new_dns.WriteString(params["protocol"])
-		new_dns.WriteString("; ")
-	}
-
-	// user
-	new_dns.WriteString("UID=")
-	new_dns.WriteString(params["user id"])
-	new_dns.WriteString("; ")
-
-	// password
-	new_dns.WriteString("PWD=")
-	new_dns.WriteString(params["password"])
-	new_dns.WriteString("; ")
-
-	return new_dns.String()
+	return wanted_map
 }
 
 // generate DSN string in url format from parameters map
-func GenDSNUrl(driver string, params map[string]string) string {
+// func GenDSNUrl(driver string, params map[string]string) string {
 
-	new_dns := new(strings.Builder)
+// 	new_dns := new(strings.Builder)
 
-	new_dns.WriteString(driver)
-	new_dns.WriteString("://")
+// 	new_dns.WriteString(driver)
+// 	new_dns.WriteString("://")
 
-	// Hostname
-	new_dns.WriteString(params["server"])
+// 	// Hostname
+// 	new_dns.WriteString(params["server"])
 
-	// Port
-	if params["port"] != "" {
-		new_dns.WriteString(":")
-		new_dns.WriteString(params["port"])
+// 	// Port
+// 	if params["port"] != "" {
+// 		new_dns.WriteString(":")
+// 		new_dns.WriteString(params["port"])
+// 	}
+// 	// instance
+// 	if params["instance"] != "" {
+// 		new_dns.WriteString("/")
+// 		new_dns.WriteString(params["instance"])
+// 	}
+
+// 	param_idx := 0
+// 	for key, val := range params {
+// 		if key == "server" || key == "port" {
+// 			continue
+// 		}
+// 		if param_idx == 0 {
+// 			new_dns.WriteString("?")
+// 		} else {
+// 			new_dns.WriteString("&")
+// 		}
+// 		new_dns.WriteString(url.QueryEscape(key))
+// 		new_dns.WriteString("=")
+// 		new_dns.WriteString(url.QueryEscape(val))
+// 		param_idx++
+// 	}
+
+// 	return new_dns.String()
+// }
+
+func BuildPasswd(
+	logger *slog.Logger,
+	passwd string,
+	symbol_table map[string]interface{},
+) (string, string, error) {
+	ciphertext := passwd[len("/encrypted/"):]
+	logger.Debug("debug ciphertext",
+		"ciphertext", ciphertext)
+	auth_key := GetMapValueString(symbol_table, "auth_key")
+	logger.Debug(
+		"debug authkey",
+		"auth_key", auth_key)
+	if auth_key == "" {
+		return "", "", fmt.Errorf("password is encrypt and not ciphertext provided (auth_key)")
 	}
-	// instance
-	if params["instance"] != "" {
-		new_dns.WriteString("/")
-		new_dns.WriteString(params["instance"])
+	cipher, err := encrypt.NewAESCipher(auth_key)
+	if err != nil {
+		err := fmt.Errorf("can't obtain cipher to decrypt")
+		return "", "", err
 	}
-
-	param_idx := 0
-	for key, val := range params {
-		if key == "server" || key == "port" {
-			continue
-		}
-		if param_idx == 0 {
-			new_dns.WriteString("?")
-		} else {
-			new_dns.WriteString("&")
-		}
-		new_dns.WriteString(url.QueryEscape(key))
-		new_dns.WriteString("=")
-		new_dns.WriteString(url.QueryEscape(val))
-		param_idx++
+	passwd, err = cipher.Decrypt(ciphertext, true)
+	if err != nil {
+		err := fmt.Errorf("invalid key provided to decrypt")
+		return "", "", err
 	}
-
-	return new_dns.String()
+	return passwd, auth_key, nil
 }

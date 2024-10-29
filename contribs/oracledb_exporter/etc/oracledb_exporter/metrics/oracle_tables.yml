@@ -1,0 +1,41 @@
+
+collector_name: oracle_tables
+# namespace: oracledb
+metrics:
+
+  # top 10 tables size
+  - metric_name: topn_tablesize_bytes
+    help: "Gauge metric with top 10 of tables with highest rows count."
+    type: gauge
+    query: |
+      SELECT tab.owner, tab.table_name, tablespace_name, rownum as rank, stab.bytes as size_bytes
+      FROM dba_tables  tab, dba_segments stab
+      WHERE stab.owner = tab.owner AND stab.segment_name = tab.table_name
+      AND tab.owner NOT LIKE '%SYS%'
+      and rownum < 10
+      order by stab.bytes, table_name
+    key_labels:
+      - owner
+      - table_name
+      - tablespace_name
+      - rank
+    values:
+      - size_bytes
+
+  # top 10 table row count
+  - metric_name: topn_tablerows_count
+    help: "Gauge metric with top 10 of tables with highest rows count."
+    type: gauge
+    query: |
+      select owner,table_name, tablespace_name, rownum as rank, num_rows
+      from dba_tables
+      where owner not like '%SYS%' and num_rows is not null
+      and rownum < 10
+      order by num_rows DESC, table_name
+    key_labels:
+      - owner
+      - table_name
+      - tablespace_name
+      - rank
+    values:
+      - num_rows

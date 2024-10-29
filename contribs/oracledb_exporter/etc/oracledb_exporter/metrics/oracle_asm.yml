@@ -1,0 +1,24 @@
+collector_name: oracle_asm
+# namespace: oracledb
+metrics:
+  - metric_name: asmspace
+    help: "Gauge metric with interconnect block transfers (v$sysstat)."
+    type: gauge
+    query: |
+      SELECT g.name, 
+      sum(d.total_mb) as total,
+      sum(d.free_mb) as free,
+      sum(d.total_mb) -  sum(d.free_mb) as used
+      FROM v$asm_disk_stat d
+      JOIN v$asm_diskgroup_stat g 
+        on d.group_number = g.group_number
+      WHERE
+        d.header_status = 'MEMBER'
+      GROUP by g.name,  g.group_number
+    key_labels:
+      - name
+    value_label: type
+    values:
+      - total
+      - free
+      - used

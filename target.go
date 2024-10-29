@@ -31,16 +31,16 @@ const (
 // like a prometheus.Collector, except its Collect() method takes a Context to run in.
 type Target interface {
 	// Collect is the equivalent of prometheus.Collector.Collect(), but takes a context to run in.
-	Collect(ctx context.Context, ch chan<- Metric)
+	Collect(ctx context.Context, ch chan<- Metric, health_only bool)
 	Name() string
 	Config() *TargetConfig
-	GetDeadline() time.Time
-	SetDeadline(time.Time)
 	SetSymbol(string, any) error
+	DeleteSymbol(key string)
 	GetSymbolTable() map[string]any
 	SetLogger(*slog.Logger)
 	Lock()
 	Unlock()
+	CloseCnx()
 }
 
 // target implements Target. It wraps a sql.DB, which is initially nil but never changes once instantianted.
@@ -56,11 +56,12 @@ type target struct {
 	collectorStatusDesc MetricDesc
 	logContext          []interface{}
 
-	conn     *sql.DB
-	logger   *slog.Logger
-	deadline time.Time
+	conn   *sql.DB
+	logger *slog.Logger
 
 	symbols_table map[string]interface{}
+	// to store the final dsn instead of recompe it each time
+	private_dsn string
 
 	// to protect the data during exchange
 	content_mutex *sync.Mutex
@@ -186,14 +187,8 @@ func (t *target) GetSymbolTable() map[string]any {
 	return t.symbols_table
 }
 
-// Getter for deadline
-func (t *target) GetDeadline() time.Time {
-	return t.deadline
-}
-
-// Setter for deadline
-func (t *target) SetDeadline(tt time.Time) {
-	t.deadline = tt
+func (t *target) DeleteSymbol(key string) {
+	delete(t.symbols_table, key)
 }
 
 func (t *target) SetLogger(logger *slog.Logger) {
@@ -210,8 +205,18 @@ func (t *target) Unlock() {
 	t.content_mutex.Unlock()
 }
 
+func (t *target) CloseCnx() {
+	t.content_mutex.Lock()
+	if t.conn != nil {
+		t.conn.Close()
+		t.conn = nil
+	}
+	t.content_mutex.Unlock()
+
+}
+
 // Collect implements Target.
-func (t *target) Collect(ctx context.Context, ch chan<- Metric) {
+func (t *target) Collect(ctx context.Context, ch chan<- Metric, health_only bool) {
 	var (
 		scrapeStart = time.Now()
 		targetUp    = true
@@ -225,6 +230,9 @@ func (t *target) Collect(ctx context.Context, ch chan<- Metric) {
 	if t.config.Name != "" {
 		// Export the target's `up` metric as early as we know what it should be.
 		ch <- NewMetric(t.upDesc, boolToFloat64(targetUp))
+	}
+	if health_only {
+		return
 	}
 
 	var wg sync.WaitGroup
@@ -248,14 +256,67 @@ func (t *target) Collect(ctx context.Context, ch chan<- Metric) {
 	}
 }
 
+func (t *target) hasChangedAuthKey() bool {
+	var auth_key, old_auth_key, need_auth_key string
+	res := false
+	// if set else do nothing
+	params := GetMapValueMap(t.symbols_table, "params")
+	if params != nil {
+		need_auth_key = GetMapValueString(params, "need_auth_key")
+		if need_auth_key == "false" {
+			return res
+		}
+		old_auth_key = GetMapValueString(params, "auth_key")
+	} else {
+		// probably first call to ping...
+		res = true
+	}
+	auth_key = GetMapValueString(t.symbols_table, "auth_key")
+	// it has changed, so reset the dsn value so it can be recomputed
+	if auth_key != old_auth_key {
+		res = true
+	}
+	return res
+}
+
 func (t *target) ping(ctx context.Context) error {
 	// Create the DB handle, if necessary. It won't usually open an actual connection, so we'll need to ping afterwards.
 	// We cannot do this only once at creation time because the sql.Open() documentation says it "may" open an actual
 	// connection, so it "may" actually fail to open a handle to a DB that's initially down.
+
+	// internal dsn has already been computed
+	// check if auth_key is set and has changed
+	if t.hasChangedAuthKey() {
+		// it has changed reset the dsn value so it can be recomputed
+		if t.private_dsn != "" {
+			t.private_dsn = ""
+		}
+		if t.conn != nil {
+			t.conn.Close()
+			t.conn = nil
+		}
+	}
+
 	if t.conn == nil {
-		conn, err := OpenConnection(ctx, t.logContext, t.logger, string(t.config.DSN),
-			t.config.AuthConfig,
-			t.globalConfig.MaxConns, t.globalConfig.MaxIdleConns, t.symbols_table)
+		if t.private_dsn == "" {
+			if val, err := BuildConnection(t.logger,
+				string(t.config.DSN),
+				t.config.AuthConfig,
+				t.symbols_table,
+			); err == nil {
+				t.private_dsn = val
+			} else {
+				return ErrorWrap(t.logContext, err)
+			}
+		}
+
+		conn, err := OpenConnection(ctx,
+			t.logContext,
+			t.logger,
+			driver_name,
+			t.private_dsn,
+			t.globalConfig.MaxConns, t.globalConfig.MaxIdleConns,
+		)
 		if err != nil {
 			if err != ctx.Err() {
 				return ErrorWrap(t.logContext, err)
@@ -277,11 +338,17 @@ func (t *target) ping(ctx context.Context) error {
 			}
 		}
 		if err != nil {
+			if check_login_error(err) {
+				t.conn.Close()
+				t.conn = nil
+			}
 			return ErrorWrap(t.logContext, err)
 		}
 	}
 
 	if ctx.Err() != nil {
+		t.conn.Close()
+		t.conn = nil
 		return ErrorWrap(t.logContext, ctx.Err())
 	}
 	return nil

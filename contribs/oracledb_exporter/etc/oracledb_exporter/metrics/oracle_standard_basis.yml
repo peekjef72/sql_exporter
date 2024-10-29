@@ -1,0 +1,197 @@
+collector_name: oracle_standard
+# namespace: oracledb
+metrics:
+  - metric_name: "version"
+    help: "oracle version"
+    type: gauge
+    values:
+      - value
+    key_labels:
+      - version
+      - platform_name
+    query: |
+      select 
+        1 as value,
+        version,
+        platform_name 
+      from v$instance, v$database
+
+  - metric_name: uptime
+    help: "Gauge metric with uptime in days of the Instance."
+    type: gauge
+    query: |
+      select sysdate-startup_time as uptime from v$instance
+    values:
+      - uptime
+
+  - metric_name: session
+    help: "Gauge metric user/system active/passive sessions (v$session)."
+    type: gauge
+    query: |
+      SELECT decode(username,NULL,'SYSTEM','SYS','SYSTEM','USER') as type,
+        status as state,
+        count(*) as value
+      FROM v$session
+      GROUP BY decode(username,NULL,'SYSTEM','SYS','SYSTEM','USER'), status
+    key_labels:
+      - type
+      - state
+    values:
+      - value
+
+  - metric_name: process_num
+    help: Gauge metric with count of processes.
+    type: gauge
+    values:
+      - count
+    query: |
+      SELECT COUNT(*) as count FROM v$process
+
+  - metric_name: db_system
+    help: Database system resources metric from v$parameter
+    type: gauge
+    key_labels:
+      - name
+    values:
+      - value
+    query: |
+      select name, value
+      from v$parameter
+      where name in ('cpu_count', 'sga_max_size', 'pga_aggregate_limit')
+
+  - metric_name: cachehitratio
+    help: Gauge metric witch Cache hit ratios (v$sysmetric).
+    type: gauge
+      # metric_id  metric_name
+      # 2000    Buffer Cache Hit Ratio
+      # 2050    Cursor Cache Hit Ratio
+      # 2112    Library Cache Hit Ratio
+      # 2110    Row Cache Hit Ratio
+    query: |
+      select metric_name as type , value
+      from v$sysmetric
+      where group_id=2 
+        and metric_id in (2000,2050,2112,2110)
+    key_labels:
+      - type
+    values:
+      - value
+
+  - metric_name: sysmetric
+    help: "Gauge metric with read/write pysical IOPs/bytes (v$sysmetric)."
+    type: gauge
+    # metric_id  metric_name
+    # 2092    Physical Read Total IO Requests Per Sec
+    # 2093    Physical Read Total Bytes Per Sec
+    # 2100    Physical Write Total IO Requests Per Sec
+    # 2124    Physical Write Total Bytes Per Sec
+    query: |
+      select lower(metric_name) as type, value
+      from v$sysmetric
+      where metric_id in (2092,2093,2124,2100)
+    key_labels:
+      - type
+    values:
+      - value
+
+  - metric_name: waitclass
+    help: "Gauge metric with Waitevents (v$waitclassmetric)."
+    type: gauge
+    key_labels:
+      - type
+    values:
+      - value
+    query: |
+      SELECT lower(n.wait_class) as type,
+      round(m.time_waited/m.INTSIZE_CSEC,3) as value
+      FROM v$waitclassmetric m, v$system_wait_class n
+      WHERE m.wait_class_id=n.wait_class_id and n.wait_class != 'Idle'
+
+  - metric_name: redo
+    help: "Gauge metric with Redo log switches over last 5 min (v$log_history)."
+    type: gauge
+    query: |
+      select count(*) as value
+      from v$log_history
+      where first_time > sysdate - 1/24/12
+    values:
+      - value
+
+  - metric_name: sysstat
+    help: "Gauge metric with commits/rollbacks/parses (v$sysstat)."
+    type: gauge
+      # metric_id
+      #    6   user commits
+      #    7   user rollbacks
+      # 1084   parse count (total)
+      # 1089   execute count
+        # name in ( 'parse count (total)', 'execute count',
+        #   'user commits', 'user rollbacks')
+    query: |
+      SELECT name as type, value
+      FROM v$sysstat
+      WHERE 
+        statistic# in (6,7,1084,1089)
+    key_labels:
+      - type
+    values:
+      - value
+
+  - metric_name: tablespace
+    help: "Gauge metric with total/free size of the Tablespaces."
+    type: gauge
+    # "database", "dbinstance", "type", "name", "contents", "autoextend"
+    query: |
+      WITH
+        getsize AS (
+          SELECT tablespace_name, max(autoextensible) autoextensible, SUM(bytes) tsize, sum(maxbytes) maxbytes
+            FROM dba_data_files GROUP BY tablespace_name),
+        getfree as (
+          SELECT tablespace_name, contents, SUM(blocks*block_size) tfree
+            FROM DBA_LMT_FREE_SPACE a, v$tablespace b, dba_tablespaces c
+            WHERE a.TABLESPACE_ID= b.ts# and b.name=c.tablespace_name
+            GROUP BY tablespace_name,contents)
+      SELECT 
+          a.tablespace_name as name, 
+          b.contents,
+          a.tsize as total,
+          a.maxbytes as max,
+          b.tfree as free,
+          a.tsize - b.tfree as used,
+          a.autoextensible autoextend
+        FROM GETSIZE a
+        JOIN GETFREE b on a.tablespace_name = b.tablespace_name
+      UNION
+      SELECT 
+          tablespace_name, 
+          'TEMPORARY', 
+          sum(tablespace_size), 
+          sum(tablespace_size), 
+          sum(free_space),
+          sum(tablespace_size) - sum(free_space),
+          'NO'
+        FROM dba_temp_free_space
+        GROUP BY tablespace_name
+    key_labels:
+      - name
+      - contents
+      - autoextend
+    value_label: type
+    values:
+      - total
+      - max
+      - free
+      - used
+
+  - metric_name: interconnect
+    help: "Gauge metric with interconnect block transfers (v$sysstat)."
+    type: gauge
+    # "database", "dbinstance", "type", "name", "contents", "autoextend"
+    query: |
+      SELECT lower(name) as type, value
+      FROM V$SYSSTAT
+      WHERE name in ('gc cr blocks served','gc cr blocks flushed','gc cr blocks received')
+    key_labels:
+      - type
+    values:
+      - value

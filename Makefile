@@ -39,11 +39,12 @@ build-mssql: promu passwd_encrypt
 
 build-oracledb: promu passwd_encrypt
 	@echo ">> building ORACLE binaries"
-	@$(PROMU) build --config=.promu-oracle.yml
+	@. $(PREFIX)/.env_oracle && $(PROMU) build --prefix $(PREFIX) --config=.promu-oracle.yml
+	# @$(PROMU) build --config=.promu-oracle.yml
 
 build-db2: promu passwd_encrypt
 	@echo ">> building DB2 binaries"
-	@$(PROMU) build --config=.promu-db2.yml
+	@. $(PREFIX)/.env_db2 && $(PROMU) build --config=.promu-db2.yml
 
 build-hanasql: promu passwd_encrypt
 	@echo ">> building HANASQL binaries"

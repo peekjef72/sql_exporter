@@ -1,0 +1,31 @@
+# specify all configuration elements for the instance
+# name: the name to identify the instance; it is used as target value by prometheus /metrics?target=name
+name: MY_INSTANCE_NAME
+
+# Data source name always has a URI schema or DSN format that matches the driver name.
+# => "oracle://<hostname>:<port>/<instance>?user%20id=<login>&password=<password>&database=<database>&protocol=...&options="
+#
+# or:
+#
+# => INSTANCE=<instance>; DATABASE=<database>; HOSTNAME=<hostname>; PORT=<port>; PROTOCOL=<protocol>; UID=<login>; PWD=<password>; option=<option_value>
+#
+# ## options parameters synonym => final value
+# * server, hostname => server
+# * uid, user, login => user id
+# * pwd, passwd, password => password
+#
+#	 valid options are:
+#		- loc
+#	 - isolation
+#	 - questionph
+#	 - prefetch_rows
+#	 - prefetch_memory
+#	 - as
+#	 - stmt_cache_size
+data_source_name: 'oracle://<db_user>:<db_password>@><dbserver.host.domain>:<dbport>/<db_instance>'
+# or using dsn directives:
+data_source_name: "HOSTNAME=<dbserver.host.domain>;PORT=<dbport>;PROTOCOL=TCP;INSTANCE=<db_instance>;DATABASE=<db_pdb>;UID=<db_user>;PWD=<db_password>;isolation=READONLY"
+
+# Collectors (referenced by name) to execute on the target.
+collectors: 
+  - ~oracle_standard_.*

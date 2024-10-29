@@ -7,6 +7,9 @@ As examples 4 configurations for exporters are provided (see contribs):
  * [oracle](contribs/oracle_exporter/)
  * [hana](contribs/hanasql_exporter/)
 
+This exporter was [free/sql_exporter](https://github.com/free/sql_exporter) before version 0.5.
+In actual version the exporter is compiled via tag for specific sql server. The advantage is to have only one logic for configuration and deployement.
+
 ## Overview
 
 <figure>
@@ -14,7 +17,7 @@ As examples 4 configurations for exporters are provided (see contribs):
     <figcaption style="font-style: italic; text-align: center;">MSSQL dashboard overview</figcaption>
 </figure>
 
-SQL Exporter is a configuration driven exporter that exposes metrics gathered from MSSQL Servers, for use by the Prometheus monitoring system. Out of the box, it provides support for Microsoft SQL Server, IBM DB2, HANADB but any DBMS for which a Go driver is available may be monitored after rebuilding the binary with the DBMS driver included.
+SQL Exporter is a configuration driven exporter that exposes metrics gathered from MSSQL Servers, for use by the Prometheus monitoring system. Out of the box, it provides support for Microsoft SQL Server, IBM DB2, HANADB, and Oracle but any DBMS for which a Go driver is available may be monitored after rebuilding the binary with the DBMS driver included.
 
 The exporter is multi targets, meaning that you can set several target servers configuration identified each by name, then Prometheus can scratch these targets by adding the parameter target into the url. It can also works with a default target configuration and authentication models 
 
@@ -30,7 +33,7 @@ metrics when queried more frequently than the configured interval.
 ### mssql or hanasql
 mssql_exporter and hanasql_exporter can be compiled staticaly.
 ```bash
-make build-mssql build-hana
+make build-mssql build-hanasql
 ```
 
 pre-requirements:
@@ -74,7 +77,7 @@ Here a small summary for linux:
   ```
 
   ```text
-  export IBM_DB_HOME=/home/jfpi<user>k/db2/clidriver
+  export IBM_DB_HOME=/home/<user>/db2/clidriver
   export CGO_CFLAGS="-I $IBM_DB_HOME/include"
   export CGO_LDFLAGS="-L $IBM_DB_HOME/lib"
   export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$IBM_DB_HOME/lib
@@ -114,14 +117,19 @@ ldconfig
 
 check oci8.pc and .promu-oracle.yml file to adapt version or path with installed rpm.
 
+
+  Then use this file:
+
+    ```bash
+    . .env_oracle
+    make build-oracledb
+    ```
+
 ## Usage
+Uasage is the same for all sql_exporters, but will be explained only for mssql_exporter.
 
-Get Prometheus MSSQL Exporter as a [packaged release](https://github.com/free/mssql_exporter/releases/latest) or
-build it yourself:
-
-```
-$ go install github.com/free/sql_exporter/cmd/sql_exporter
-```
+Get Prometheus MSSQL Exporter as a [packaged release](https://github.com/jfpik/sql_exporter/releases/latest) or
+build it yourself (see above.)
 
 then run it from the command line:
 
@@ -135,22 +143,32 @@ Use the `--help` flag to get help information.
 $ ./mssql_exporter --help
 usage: mssql_exporter [<flags>]
 
+
 Flags:
-  -h, --help               Show context-sensitive help (also try --help-long and --help-man).
+  -h, --[no-]help                Show context-sensitive help (also try --help-long and --help-man).
       --config.data-source-name=CONFIG.DATA-SOURCE-NAME  
-                           Data source name to override the value in the configuration file with.
-      --web.listen-address=":9399"  
-                           The address to listen on for HTTP requests.
+                                 Data source name to override the value in the configuration file with.
       --web.telemetry-path="/metrics"  
-                           Path under which to expose collector's internal metrics.
+                                 Path under which to expose collector's internal metrics.
   -c, --config.file="config/config.yml"  
-                           mssql_exporter Exporter configuration file.
-  -d, --debug              debug connection checks.
-  -n, --dry-run            check exporter configuration file and try to collect a target then exit.
-  -t, --target=TARGET      In dry-run mode specify the target name, else ignored.
-      --log.level=info     Only log messages with the given severity or above. One of: [debug, info, warn, error]
-      --log.format=logfmt  Output format of log messages. One of: [logfmt, json]
-  -V, --version            Show application version.
+                                 mssql_exporter Exporter configuration file.
+  -d, --[no-]debug               debug connection checks.
+  -n, --[no-]dry-run             check exporter configuration file and try to collect a target then exit.
+  -t, --target=TARGET            In dry-run mode specify the target name, else ignored.
+  -m, --model="default"          In dry-run mode specify the model name to build the dynamic target, else ignored.
+  -a, --auth_key=AUTH_KEY        In dry-run mode specify the auth_key to use, else ignored.
+  -o, --collector=COLLECTOR      Specify the collector name restriction to collect, replace the collector_names set for each
+                                 target.
+      --[no-]web.systemd-socket  Use systemd socket activation listeners instead of port listeners (Linux only).
+      --web.listen-address=:9399 ...  
+                                 Addresses on which to expose metrics and web interface. Repeatable for multiple addresses.
+                                 Examples: `:9100` or `[::1]:9100` for http, `vsock://:9100` for vsock
+      --web.config.file=""       Path to configuration file that can enable TLS or authentication. See:
+                                 https://github.com/prometheus/exporter-toolkit/blob/master/docs/web-configuration.md
+      --log.level=info           Only log messages with the given severity or above. One of: [debug, info, warn, error]
+      --log.format=logfmt        Output format of log messages. One of: [logfmt, json]
+  -V, --[no-]version             Show application version.
+
 ```
 
 ## Configuration
@@ -253,27 +271,114 @@ To keep things simple and yet allow fully configurable database connections to b
 Go `sql` library does not allow for automatic driver selection based on the DSN (i.e. an explicit driver name must be
 specified) SQL Exporter uses the schema part of the DSN (the part before the `://`) to determine which driver to use.
 
-Unfortunately, while this works out of the box with the [MS SQL Server](https://github.com/denisenkom/go-mssqldb) and
-[PostgreSQL](github.com/lib/pq) drivers, the [MySQL driver](github.com/go-sql-driver/mysql) DSNs format does not include
-a schema and the [Clickhouse](github.com/kshvakov/clickhouse) one uses `tcp://`. So SQL Exporter does a bit of massaging
-of DSNs for the latter two drivers in order for this to work:
 
 DB | SQL Exporter expected DSN | Driver sees
 :---|:---|:---
-Oracle | `oracle://<host>:<port>/<sid>?user_id=<login>&password=<password>&params=<VAL>`<br>or<br>`oci8:///user:passw@host:port/dbname?params=<VAL>`| optionnal parameters: <ul><li>loc=&lt;time.location&gt; default time.UTC<br><li>isolation=&lt;READONLY&#124;SERIALIZABLE&#124;DEFAULT&gt;<li>questionph=&lt;enableQuestionPlaceHolders&gt; true&#124;false<li>prefetch_rows=&lt;u_int&gt; default 0<li>prefetch_memory=&lt;u_int&gt; default 4096<li>as=&lt;sysdba&#124;sysasm&#124;sysoper default empty.<li>stmt_cache_size=<u_int>default 0</ul>
-<strike>MySQL</strike> | <strike>`mysql://user:passw@protocol(host:port)/dbname` | `user:passw@protocol(host:port)/dbname`
-PostgreSQL | `postgres://user:passw@host:port/dbname` | *unchanged*
-SQL Server | `sqlserver://user:passw@host:port/instance` | *unchanged*
+DB2 | `db2:////<hostname>:<port>?user%20id=<login>&password=<password>&database=<database>&protocol=...`<br>or<br>`db2://DATABASE=<database>; HOSTNAME=<hostname>; PORT=<port>; PROTOCOL=<protocol>; UID=<login>; PWD=<password>;`|
+Hanasql | `hdb:////<hostname>:<port>?user%20id=<login>&password=<password>&database=<database>&protocol=...`<br>or<br>`hdb://DATABASE=<database>; HOSTNAME=<hostname>; PORT=<port>; PROTOCOL=<protocol>; UID=<login>; PWD=<password>;`| optionnal parameters: <ul><li>databaseName=&lt;dbname&gt;<li> defaultSchema=&lt;schema&gt; <li>timeout=&lt;timeout_seconds&gt;<li>pingInterval=&lt;intervanl_seconds&gt;<li>TLSRootCAFile=&lt;file&gt;<li>TLSServerName=&lt;file&gt;<li>TLSInsecureSkipVerify=&lt;file&gt;</ul>
+Oracle | `oracle://<host>:<port>/<sid>?user_id=<login>&password=<password>&params=<VAL>`<br>or<br>`oci:///user:passw@host:port/dbname?params=<VAL>`<br>or<br>`oracle://DATABASE=<database>; HOSTNAME=<hostname>; PORT=<port>; PROTOCOL=<protocol>; UID=<login>; PWD=<password>; optional=<value>` | optionnal parameters: <ul><li>loc=&lt;time.location&gt; default time.UTC<br><li>isolation=&lt;READONLY&#124;SERIALIZABLE&#124;DEFAULT&gt;<li>questionph=&lt;enableQuestionPlaceHolders&gt; true&#124;false<li>prefetch_rows=&lt;u_int&gt; default 0<li>prefetch_memory=&lt;u_int&gt; default 4096<li>as=&lt;sysdba&#124;sysasm&#124;sysoper default empty.<li>stmt_cache_size=<u_int>default 0</ul>
+SQL Server | `sqlserver://<hostname>:<port>/<instance>?user%20id=<login>&password=<password>&database=<database>&protocol=...`<br>or<br>`sqlserver://DATABASE=<database>; HOSTNAME=<hostname>; PORT=<port>; PROTOCOL=<protocol>; UID=<login>; PWD=<password>;` | *unchanged*
+<strike>PostgreSQL</strike> | <strike>`postgres://user:passw@host:port/dbname`</strike> | <strike>*unchanged*</strike>
 
-## Why It Exists
+### User authentication / password encryption
 
-SQL Exporter started off as an exporter for Microsoft SQL Server, for which no reliable exporters exist. But what is
-the point of a configuration driven SQL exporter, if you're going to use it along with 2 more exporters with wholly
-different world views and configurations, because you also have MySQL and PostgreSQL instances to monitor?
+If you don't want to write the users' password in clear text in config file (targets files on the exporter), you can encrypt them with a shared password.
 
-A couple of alternative database agnostic exporters are available -- https://github.com/justwatchcom/sql_exporter and
-https://github.com/chop-dbhi/prometheus-sql -- but they both do the collection at fixed intervals, independent of
-Prometheus scrapes. This is partly a philosophical issue, but practical issues are not all that difficult to imagine:
-jitter; duplicate data points; or collected but not scraped data points. The control they provide over which labels get
-applied is limited, and the base label set spammy. And finally, configurations are not easily reused without
-copy-pasting and editing across jobs and instances.
+How it works:
+- choose a shared password (passphrase) of 16 24 or 32 bytes length and store it your in your favorite password keeper (keepass for me).
+- use passwd_encrypt tool:
+
+    ```bash
+    ./passwd_encrypt 
+    give the key: must be 16 24 or 32 bytes long
+    enter key: 0123456789abcdef 
+    enter password: mypassword
+    Encrypting...
+    Encrypted message hex: CsG1r/o52tjX6zZH+uHHbQx97BaHTnayaGNP0tcTHLGpt5lMesw=
+    $
+    ```
+
+- set the user password in the target file part:
+
+    ```yaml
+    name: <target_name>
+    # doublequotes are mandatory because of ":" in string
+    data_source_name: "<driver>://<hostname>:<port>/<instance>?database=<database>?protocol=TCP&isolation=READONLY"
+    auth_config:
+      user: <user>
+      # password: "/encrypted/base64_encrypted_password_by_passwd_crypt_cmd"
+      password: /encrypted/qtj1GrR3HcqtJFoBAnEIXlQYQtcptu4COs1Q3A85A5z6vv5HXEC4n0aXWQI=
+    collectors:
+      - <collectors_name>
+    ```
+- set the shared passphrase in prometheus config (either job or node file)
+
+  * prometheus jobs with target files:
+    ```yaml
+    #--------- Start prometheus <driver> exporter  ---------#
+    - job_name: "<driver>"
+        metrics_path: /metrics
+        file_sd_configs:
+          - files: [ "/etc/prometheus/<driver>_nodes/*.yml" ]
+        relabel_configs:
+          - source_labels: [__address__]
+            target_label: __param_target
+          - source_labels: [__tmp_source_host]
+            target_label: __address__
+
+    #--------- End prometheus <driver> exporter ---------#
+    ```
+
+    ```yaml
+    - targets: [ "<target_name>" ]
+      labels:
+        # if you have activated password encrypted passphrass
+        __param_auth_key: 0123456789abcdef
+        host: "<target_name>_fullqualified.domain.name"
+        # custom labels…
+        environment: "DEV"
+    ```
+## Loging level
+
+You can change the log.level online by sending a signal USR2 to the process. It will increase and cycle into levels each time a si
+gnal is received.
+
+```shell
+kill -USR2 pid
+```
+Usefull if something is wrong and you want to have detailled log only for a small interval.
+
+You can also set the loglevel using API endpoint /loglevel
+* GET /loglevel : to retrieve the current level
+* POST /loglevel : to cycle and increase the current loglevel
+* POST /loglevel/\<level\> : to set level to \<level\>
+
+## Reload
+
+You can tell the exporter to reload its configuration by sending a signal HUP to the process or send a POST request to /reload endpoint.
+
+
+## Exporter HTTP server
+
+The exporter http server has a default landing page that permit to access
+* "/health" : a simple heartbeat page that return "OK" if exporter is UP
+* "/config": expose defined configuration of the exporter
+* "/targets": expose all known targets (locally defined or dynamically defined). Password are masked.
+* "/targets/&lt;target&gt;": obtain configuration for target &lt;target&gt; or 404 Not found if doesn't exist. Password are masked.
+* "/status": expose exporter version, process start time
+* "/debug": expose exporter debug/profiling metrics
+* "/sql_exporter_metrics": exporter internal prometheus metrics
+* "/metrics": expose target's metrics.
+* "/loglevel": GET exposes exporter current log level. POST /loglevel increases by one the current level (cycling). POST /loglevel/[level] set the new [level].
+* "/reload": method POST only: tells the exporter to reload the configuration.
+
+Reponse can be set to json by supplying a header "Accept: application/json" in the request.
+
+### Prometheus scrapping
+Prometheus scraps a target by geting the url /metrics or *metric_path if you redefine it by command line argument.
+The entrypoint "metrics" accepts the following argument:
+  - target [mandatory]
+  - model
+  - auth_name
+  - auth_key
+  - health

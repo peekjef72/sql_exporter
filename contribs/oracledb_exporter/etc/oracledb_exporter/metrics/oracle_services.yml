@@ -1,0 +1,13 @@
+
+collector_name: oracle_services
+# namespace: oracledb
+metrics:
+  - metric_name: services
+    help: "Active Oracle Services (v$active_services) labeled by service name and always valued to 1."
+    type: gauge
+    query: |
+      select name, 1 as value from v$active_services
+    key_labels:
+      - name
+    values:
+      - value
