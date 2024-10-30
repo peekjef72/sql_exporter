@@ -1,11 +1,13 @@
-# Prometheus SQL Exporter 
+# Prometheus SQL Exporter
+
 Exporter for [Prometheus](https://prometheus.io) that can collect multiple type of sql servers.
 
 As examples 4 configurations for exporters are provided (see contribs):
- * [mssql](contribs/mssql_exporter/)
- * [db2](contribs/db2_exporter/)
- * [oracle](contribs/oracle_exporter/)
- * [hana](contribs/hanasql_exporter/)
+
+* [mssql](contribs/mssql_exporter/)
+* [db2](contribs/db2_exporter/)
+* [oracle](contribs/oracle_exporter/)
+* [hana](contribs/hanasql_exporter/)
 
 This exporter was [free/sql_exporter](https://github.com/free/sql_exporter) before version 0.5.
 In actual version the exporter is compiled via tag for specific sql server. The advantage is to have only one logic for configuration and deployement.
@@ -19,7 +21,7 @@ In actual version the exporter is compiled via tag for specific sql server. The 
 
 SQL Exporter is a configuration driven exporter that exposes metrics gathered from MSSQL Servers, for use by the Prometheus monitoring system. Out of the box, it provides support for Microsoft SQL Server, IBM DB2, HANADB, and Oracle but any DBMS for which a Go driver is available may be monitored after rebuilding the binary with the DBMS driver included.
 
-The exporter is multi targets, meaning that you can set several target servers configuration identified each by name, then Prometheus can scratch these targets by adding the parameter target into the url. It can also works with a default target configuration and authentication models 
+The exporter is multi targets, meaning that you can set several target servers configuration identified each by name, then Prometheus can scratch these targets by adding the parameter target into the url. It can also works with a default target configuration and authentication models.
 
 The collected metrics and the queries that produce them are entirely configuration defined. **No SQL query are hard coded inside the exporter**. SQL queries are grouped into
 collectors -- logical groups of queries, e.g. *query stats* or *I/O stats*, mapped to the metrics they populate.
@@ -31,13 +33,16 @@ metrics when queried more frequently than the configured interval.
 ## building
 
 ### mssql or hanasql
+
 mssql_exporter and hanasql_exporter can be compiled staticaly.
+
 ```bash
 make build-mssql build-hanasql
 ```
 
 pre-requirements:
- - gcc (installed via your prefered package manager)
+
+* gcc (installed via your prefered package manager)
 
 ### db2
 
@@ -46,7 +51,9 @@ ctdriver must be installed first for compilation and for **usage**.
 see [go_ibm_db/INSTALL.md](https://github.com/ibmdb/go_ibm_db/blob/master/INSTALL.md)
 
 Here a small summary for linux:
+
 * download the cli :
+
   ```bash
   mkdir $HOME/db2
   cd $HOME/db2
@@ -57,6 +64,7 @@ Here a small summary for linux:
   export CGO_LDFLAGS=-L$IBM_DB_HOME/lib
   export LD_LIBRARY_PATH=$IBM_DB_HOME/lib:$LD_LIBRARY_PATH
   ```
+
   If you have root access you can set path to DB2 dynamic library via ld.so.conf:
 
   ```bash
@@ -70,6 +78,7 @@ Here a small summary for linux:
   ```bash
   ldconfig
   ```
+
   if you plan to recompile db2_exporter several times, you can build an env file:
 
   ```bash
@@ -102,12 +111,13 @@ oracledb_exporter can't be compiled staticaly too. Oracle Instant client must be
 Download and install an oracle instant client: recommanded on linux oracle-instantclient19.23-basiclite-19.23.0.0.0 (oracle-instantclient19.6-basiclite-19.6.0.0.0-1.x86_64.rpm
  and oracle-instantclient19.23-devel-19.23.0.0.0-1.x86_64.rpm)
 
-```
+```bash
 curl --output ~/Downloads/oracle-instantclient19.23-basic-19.23.0.0.0-1.x86_64.rpm https://yum.oracle.com/repo/OracleLinux/OL8/oracle/instantclient/x86_64/getPackage/oracle-instantclient19.23-basic-19.23.0.0.0-1.x86_64.rpm
 curl --output ~/Downloads/oracle-instantclient19.23-devel-19.23.0.0.0-1.x86_64.rpm https://yum.oracle.com/repo/OracleLinux/OL8/oracle/instantclient/x86_64/getPackage/oracle-instantclient19.23-devel-19.23.0.0.0-1.x86_64.rpm
 ```
 
 then install the download package, and update library path
+
 ```bash
 dnf install file:///home/jfpik/Downloads/oracle-instantclient19.23-basic-19.23.0.0.0-1.x86_64.rpm 
 dnf install file:///home/jfpik/Downloads/oracle-instantclient19.23-devel-19.23.0.0.0-1.x86_64.rpm
@@ -117,29 +127,29 @@ ldconfig
 
 check oci8.pc and .promu-oracle.yml file to adapt version or path with installed rpm.
 
+Then use this file:
 
-  Then use this file:
-
-    ```bash
-    . .env_oracle
-    make build-oracledb
-    ```
+```bash
+. .env_oracle
+make build-oracledb
+```
 
 ## Usage
-Uasage is the same for all sql_exporters, but will be explained only for mssql_exporter.
+
+Usage is the same for all sql_exporters, but will be explained only for mssql_exporter.
 
 Get Prometheus MSSQL Exporter as a [packaged release](https://github.com/jfpik/sql_exporter/releases/latest) or
 build it yourself (see above.)
 
 then run it from the command line:
 
-```
-$ mssql_exporter
+```shell
+$ ./mssql_exporter
 ```
 
 Use the `--help` flag to get help information.
 
-```
+```shell
 $ ./mssql_exporter --help
 usage: mssql_exporter [<flags>]
 
@@ -179,11 +189,9 @@ or both down. When the database is unreachable, `/metrics` responds with HTTP co
 Prometheus to record `up=0` for that scrape. Only metrics defined by collectors are exported on the `/metrics` endpoint.
 SQL Exporter process metrics are exported at `/sql_exporter_metrics`.
 
-The configuration examples listed here only cover the core elements. For a comprehensive and comprehensively documented
-configuration file check out 
-[`documentation/sql_exporter.yml`](https://github.com/free/sql_exporter/tree/master/documentation/sql_exporter.yml).
+The configuration examples listed here only cover the core elements.
 You will find ready to use "standard" DBMS-specific collector definitions in the
-[`examples`](https://github.com/free/sql_exporter/tree/master/examples) directory. You may contribute your own collector
+[`examples`](https://github.com/peekjef72/sql_exporter/tree/master/contribs) directory. You may contribute your own collector
 definitions and metric additions if you think they could be more widely useful, even if they are merely different takes
 on already covered DBMSs.
 
@@ -253,6 +261,7 @@ metrics:
       FROM MarketPrices
       GROUP BY Market
 ```
+
 ### target file
 
 ```yaml
@@ -264,6 +273,7 @@ collectors:
   - mssql_standard
 
 ```
+
 ### Data Source Names
 
 To keep things simple and yet allow fully configurable database connections to be set up, SQL Exporter uses DSNs (like
@@ -271,11 +281,10 @@ To keep things simple and yet allow fully configurable database connections to b
 Go `sql` library does not allow for automatic driver selection based on the DSN (i.e. an explicit driver name must be
 specified) SQL Exporter uses the schema part of the DSN (the part before the `://`) to determine which driver to use.
 
-
 DB | SQL Exporter expected DSN | Driver sees
 :---|:---|:---
-DB2 | `db2:////<hostname>:<port>?user%20id=<login>&password=<password>&database=<database>&protocol=...`<br>or<br>`db2://DATABASE=<database>; HOSTNAME=<hostname>; PORT=<port>; PROTOCOL=<protocol>; UID=<login>; PWD=<password>;`|
-Hanasql | `hdb:////<hostname>:<port>?user%20id=<login>&password=<password>&database=<database>&protocol=...`<br>or<br>`hdb://DATABASE=<database>; HOSTNAME=<hostname>; PORT=<port>; PROTOCOL=<protocol>; UID=<login>; PWD=<password>;`| optionnal parameters: <ul><li>databaseName=&lt;dbname&gt;<li> defaultSchema=&lt;schema&gt; <li>timeout=&lt;timeout_seconds&gt;<li>pingInterval=&lt;intervanl_seconds&gt;<li>TLSRootCAFile=&lt;file&gt;<li>TLSServerName=&lt;file&gt;<li>TLSInsecureSkipVerify=&lt;file&gt;</ul>
+DB2 | `db2:////<hostname>:<port>?user%20id=<login>&password=<password>&database=<database>&protocol=...`<br>or<br>`db2://DATABASE=<database>; HOSTNAME=<hostname>; PORT=<port>; PROTOCOL=<protocol>; UID=<login>; PWD=<password>;` | _
+Hanasql | `hdb:////<hostname>:<port>?user%20id=<login>&password=<password>&database=<database>&protocol=...`<br>or<br>`hdb://DATABASE=<database>; HOSTNAME=<hostname>; PORT=<port>; PROTOCOL=<protocol>; UID=<login>; PWD=<password>;` | optionnal parameters: <ul><li>databaseName=&lt;dbname&gt;<li> defaultSchema=&lt;schema&gt; <li>timeout=&lt;timeout_seconds&gt;<li>pingInterval=&lt;intervanl_seconds&gt;<li>TLSRootCAFile=&lt;file&gt;<li>TLSServerName=&lt;file&gt;<li>TLSInsecureSkipVerify=&lt;file&gt;</ul>
 Oracle | `oracle://<host>:<port>/<sid>?user_id=<login>&password=<password>&params=<VAL>`<br>or<br>`oci:///user:passw@host:port/dbname?params=<VAL>`<br>or<br>`oracle://DATABASE=<database>; HOSTNAME=<hostname>; PORT=<port>; PROTOCOL=<protocol>; UID=<login>; PWD=<password>; optional=<value>` | optionnal parameters: <ul><li>loc=&lt;time.location&gt; default time.UTC<br><li>isolation=&lt;READONLY&#124;SERIALIZABLE&#124;DEFAULT&gt;<li>questionph=&lt;enableQuestionPlaceHolders&gt; true&#124;false<li>prefetch_rows=&lt;u_int&gt; default 0<li>prefetch_memory=&lt;u_int&gt; default 4096<li>as=&lt;sysdba&#124;sysasm&#124;sysoper default empty.<li>stmt_cache_size=<u_int>default 0</ul>
 SQL Server | `sqlserver://<hostname>:<port>/<instance>?user%20id=<login>&password=<password>&database=<database>&protocol=...`<br>or<br>`sqlserver://DATABASE=<database>; HOSTNAME=<hostname>; PORT=<port>; PROTOCOL=<protocol>; UID=<login>; PWD=<password>;` | *unchanged*
 <strike>PostgreSQL</strike> | <strike>`postgres://user:passw@host:port/dbname`</strike> | <strike>*unchanged*</strike>
@@ -285,8 +294,9 @@ SQL Server | `sqlserver://<hostname>:<port>/<instance>?user%20id=<login>&passwor
 If you don't want to write the users' password in clear text in config file (targets files on the exporter), you can encrypt them with a shared password.
 
 How it works:
-- choose a shared password (passphrase) of 16 24 or 32 bytes length and store it your in your favorite password keeper (keepass for me).
-- use passwd_encrypt tool:
+
+* choose a shared password (passphrase) of 16 24 or 32 bytes length and store it your in your favorite password keeper (keepass for me).
+* use passwd_encrypt tool:
 
     ```bash
     ./passwd_encrypt 
@@ -298,7 +308,7 @@ How it works:
     $
     ```
 
-- set the user password in the target file part:
+* set the user password in the target file part:
 
     ```yaml
     name: <target_name>
@@ -311,9 +321,11 @@ How it works:
     collectors:
       - <collectors_name>
     ```
-- set the shared passphrase in prometheus config (either job or node file)
+
+* set the shared passphrase in prometheus config (either job or node file)
 
   * prometheus jobs with target files:
+
     ```yaml
     #--------- Start prometheus <driver> exporter  ---------#
     - job_name: "<driver>"
@@ -338,6 +350,7 @@ How it works:
         # custom labels…
         environment: "DEV"
     ```
+
 ## Loging level
 
 You can change the log.level online by sending a signal USR2 to the process. It will increase and cycle into levels each time a si
@@ -346,9 +359,11 @@ gnal is received.
 ```shell
 kill -USR2 pid
 ```
+
 Usefull if something is wrong and you want to have detailled log only for a small interval.
 
 You can also set the loglevel using API endpoint /loglevel
+
 * GET /loglevel : to retrieve the current level
 * POST /loglevel : to cycle and increase the current loglevel
 * POST /loglevel/\<level\> : to set level to \<level\>
@@ -357,10 +372,10 @@ You can also set the loglevel using API endpoint /loglevel
 
 You can tell the exporter to reload its configuration by sending a signal HUP to the process or send a POST request to /reload endpoint.
 
-
 ## Exporter HTTP server
 
-The exporter http server has a default landing page that permit to access
+The exporter http server has a default landing page that permit to access :
+
 * "/health" : a simple heartbeat page that return "OK" if exporter is UP
 * "/config": expose defined configuration of the exporter
 * "/targets": expose all known targets (locally defined or dynamically defined). Password are masked.
@@ -375,10 +390,15 @@ The exporter http server has a default landing page that permit to access
 Reponse can be set to json by supplying a header "Accept: application/json" in the request.
 
 ### Prometheus scrapping
+
 Prometheus scraps a target by geting the url /metrics or *metric_path if you redefine it by command line argument.
-The entrypoint "metrics" accepts the following argument:
-  - target [mandatory]
-  - model
-  - auth_name
-  - auth_key
-  - health
+
+The entrypoint "/metrics" accepts the following argument:
+
+* target=&lt;name&gt; [mandatory]: define the target to use:
+  * a "name" defined locally in the exporter configuration.
+  * a "definition" of target, that represents a data_source_name uri. In this case the target definition is based on the model parameter value, and if authentication is not set in the data_source_name, it should use the auth_name defined in configuration. If password  is encrypted, the shared key used to decipher must be speficied in auth_key.
+* model=&lt;model&gt; (default="default")
+* auth_name=&lt;auth_name&gt; the authentication parameters to use to connect with data_source_name
+* auth_key=&lt;auth_key&gt; the shared key used to decipher encrypted password.
+* health=&lt;true&gt; alter scraping behavior: only return the target connection status metrics; Use to determine if the connection to target is OK or not 1|0.
