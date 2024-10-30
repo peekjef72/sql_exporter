@@ -1,0 +1,29 @@
+# connect to a target predefined on exporter
+- targets: [ "oracledb_target_1" ]
+  labels:
+    __tmp_exporter_host: "oracledb_exporter_host.domain.name:9401"
+   # if you have activated password encrypted passphrass
+    __param_auth_key: __shared__auth_passphrase__
+    host: "oracledb_target_1_fullqualified.domain.name"
+    #custom labels…
+    environment: "DEV"
+
+# or connect to target using default model sending user and password
+- targets:
+    - sqlserver://host.domain.name:port/<instance>?user%id=<user>&password=<password>
+  labels:
+    __tmp_exporter_host: "oracledb_exporter_host.domain.name:9401"
+    host: "oracledb_target_1_fullqualified.domain.name"
+    #custom labels…
+    environment: "DEV"
+
+# or connect to target using default model with auth_name defined on exporter
+- targets:
+    - sqlserver://host.domain.name:port/instance
+  labels:
+    __tmp_exporter_host: "oracledb_exporter_host.domain.name:9401"
+    __param_auth_name: <auth_name_to_use_on_remote_and_allready_defined>
+    __param_auth_key: __shared__auth_passphrase__
+    host: "oracledb_target_1_fullqualified.domain.name"
+    #custom labels…
+    environment: "DEV"
