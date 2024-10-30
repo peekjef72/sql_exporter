@@ -2,7 +2,6 @@ go:
     cgo: false
 repository:
     path: github.com/peekjef72/sql_exporter
-    path: .
 build:
     binaries:
         - name: cmd/mssql_exporter

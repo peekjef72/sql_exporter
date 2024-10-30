@@ -279,7 +279,7 @@ func main() {
 	exporter.SetReloadTime(time.Now())
 
 	user2 := make(chan os.Signal, 1)
-	signal.Notify(user2, syscall.SIGUSR2)
+	init_sigusr2(user2)
 	hup := make(chan os.Signal, 1)
 	signal.Notify(hup, syscall.SIGHUP)
 	actionCh := make(chan actionMsg)
