@@ -516,7 +516,7 @@ func (t *TargetConfig) buildDumpTargetconfig() *dumpTargetConfig {
 	}
 	// if target is dynamic, the name may contain password too.
 	// so use offuscated dsn as name
-	// it can't be done one time for all because name is used to identifed target with sent params
+	// it can't be done one time for all because name is used to identified target with sent params
 	// so name must be kept untouch
 	name := t.Name
 	if t.targetType == TargetTypeDynamic {
