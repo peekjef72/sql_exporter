@@ -80,7 +80,7 @@ func (mf MetricFamily) Collect(row map[string]interface{}, ch chan<- Metric) {
 		}
 		if row[v] != nil {
 			value := row[v].(float64)
-			ch <- NewMetric(&mf, value, labelValues...)
+			ch <- NewMetric(&mf, value, labelValues)
 		} else {
 			fmt.Println("error !!!!")
 		}
@@ -187,7 +187,7 @@ type Metric interface {
 // NewMetric returns a metric with one fixed value that cannot be changed.
 //
 // NewMetric panics if the length of labelValues is not consistent with desc.labels().
-func NewMetric(desc MetricDesc, value float64, labelValues ...string) Metric {
+func NewMetric(desc MetricDesc, value float64, labelValues []string) Metric {
 	if len(desc.Labels()) != len(labelValues) {
 		panic(fmt.Sprintf("[%s] expected %d labels, got %d", desc.LogContext(), len(desc.Labels()), len(labelValues)))
 	}

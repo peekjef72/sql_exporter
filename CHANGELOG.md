@@ -3,7 +3,20 @@ All notable changes to this project will be documented in this file.
 This project adheres to [Semantic Versioning](http://semver.org/) and [Keep a changelog](https://github.com/olivierlacan/keep-a-changelog).
 
  <!--next-version-placeholder-->
+## 0.9.1 / 2024-12-14
+
+- add for dynamic target a validation of the dsn format, so that invalid one are rejected.
+- add collector_status metric labeled with collector name.
+- add config parameters in configuration file in global section for:
+    - web.listen-address (priority to config file over command line argument --web.listen-address)
+    - log.level (priority to config file over command line argument --log.level)
+    - up_help allow user to replace default help message for metric help (default is "if the target is reachable 1, else 0 if the scrape failed")
+    - scrape_duration_help same for scrap duration metric (default is "How long it took to scrape the target in seconds")
+    - collector_status_help same for collector status (default is "collector scripts status 0: error - 1: ok - 2: Invalid login 3: Timeout")
+- fixed bug with encrypted password and no auth_key provided.
+
 ## 0.9.0 / 2024-10-30
+
 - removed passwd_encrypt tool source code from httpapi_exporter: created a new stand-alone package [passwd_encrypt](https://github.com/peekjef72/passwd_encrypt). Passwd_encrypt is still installed when building and added to the released archiv.
 - updated prometheus/exporter-toolkit to 0.13.0 (log => log/slog)
 - renamed entrypoint /healthz to /health : response format depends on "accept" header (application/json, text/plain, text/html default)

@@ -36,7 +36,8 @@ func BuildConnection(
 	logger *slog.Logger,
 	dsn string,
 	auth AuthConfig,
-	symbol_table map[string]interface{}) (string, error) {
+	symbol_table map[string]any,
+	check_only bool) (string, error) {
 
 	var driver string
 	// Extract driver name from DSN.
@@ -83,20 +84,25 @@ func BuildConnection(
 				return "", fmt.Errorf("password has to be set")
 			}
 		}
-		passwd := val
-		if strings.HasPrefix(passwd, "/encrypted/") {
-			if val, auth_key, err := BuildPasswd(logger, passwd, symbol_table); err == nil {
-				params["password"] = val
-				params["auth_key"] = auth_key
-			}
-			params["need_auth_key"] = "true"
-		} else {
-			params["password"] = val
-			params["need_auth_key"] = "false"
-		}
 
-		// add params to target symbol table
-		symbol_table["params"] = params
+		if !check_only && symbol_table != nil {
+			passwd := val
+			if strings.HasPrefix(passwd, "/encrypted/") {
+				if val, auth_key, err := BuildPasswd(logger, passwd, symbol_table); err == nil {
+					params["password"] = val
+					params["auth_key"] = auth_key
+				} else {
+					return "", fmt.Errorf("unable to decrypt password")
+				}
+				params["need_auth_key"] = "true"
+			} else {
+				params["password"] = val
+				params["need_auth_key"] = "false"
+			}
+
+			// add params to target symbol table
+			symbol_table["params"] = params
+		}
 
 	default:
 		return "", fmt.Errorf("driver '%s' not supported", driver)

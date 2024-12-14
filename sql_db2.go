@@ -28,7 +28,8 @@ func BuildConnection(
 	logger *slog.Logger,
 	dsn string,
 	auth AuthConfig,
-	symbol_table map[string]interface{}) (string, error) {
+	symbol_table map[string]any,
+	check_only bool) (string, error) {
 
 	var driver string
 
@@ -77,37 +78,41 @@ func BuildConnection(
 				return "", fmt.Errorf("password has to be set")
 			}
 		}
-		passwd := val
-		if strings.HasPrefix(passwd, "/encrypted/") {
-			if val, auth_key, err := BuildPasswd(logger, passwd, symbol_table); err == nil {
+
+		if !check_only && symbol_table != nil {
+			passwd := val
+			if strings.HasPrefix(passwd, "/encrypted/") {
+				if val, auth_key, err := BuildPasswd(logger, passwd, symbol_table); err == nil {
+					params["password"] = val
+					params["auth_key"] = auth_key
+				} else {
+					return "", fmt.Errorf("unable to decrypt password")
+				}
+				params["need_auth_key"] = "true"
+			} else {
 				params["password"] = val
-				params["auth_key"] = auth_key
+				params["need_auth_key"] = "false"
 			}
-			params["need_auth_key"] = "true"
-		} else {
-			params["password"] = val
-			params["need_auth_key"] = "false"
+
+			val, ok = params["database"]
+			if !ok || val == "" {
+				return "", fmt.Errorf("database must be set")
+			}
+			if params["port"] == "" {
+				params["port"] = "60000"
+			}
+
+			if params["protocol"] == "" {
+				params["protocol"] = "TCPIP"
+			}
+
+			// remove instance from url if any has been specified
+			delete(params, "instance")
+
+			// add params to target symbol table
+			symbol_table["params"] = params
 		}
 
-		val, ok = params["database"]
-		if !ok || val == "" {
-			return "", fmt.Errorf("database must be set")
-		}
-		if params["port"] == "" {
-			params["port"] = "60000"
-		}
-
-		if params["protocol"] == "" {
-			params["protocol"] = "TCPIP"
-		}
-
-		// remove instance from url if any has been specified
-		delete(params, "instance")
-
-		// add params to target symbol table
-		symbol_table["params"] = params
-
-		// driver = "go_ibm_db"
 	default:
 		return "", fmt.Errorf("driver '%s' not supported", driver)
 	}

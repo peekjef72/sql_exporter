@@ -176,6 +176,11 @@ func main() {
 		os.Exit(1)
 	}
 
+	if exporter.Config().Globals.LogLevel != "" {
+		logConfig.Level.Set(exporter.Config().Globals.LogLevel)
+		logger = promslog.New(&logConfig)
+	}
+
 	exporter.SetLogLevel(logConfig.Level.String())
 
 	if *dry_run {
@@ -322,6 +327,9 @@ func main() {
 	srvc := make(chan struct{})
 	term := make(chan os.Signal, 1)
 	signal.Notify(term, os.Interrupt, syscall.SIGTERM)
+	if exporter.Config().Globals.WebListenAddresses != "" {
+		*toolkitFlags.WebListenAddresses = strings.Split(exporter.Config().Globals.WebListenAddresses, ",")
+	}
 
 	go func() {
 		// Setup and start webserver.

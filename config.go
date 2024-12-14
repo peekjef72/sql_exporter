@@ -376,6 +376,12 @@ type GlobalConfig struct {
 	NameSpace     string         `yaml:"namespace" json:"namespace"`                         // prefix to add to all metric name (prifx + '_')
 	ExporterName  string         `yaml:"exporter_name,omitempty" json:"exporter_name,omitempty"`
 
+	UpMetricHelp        string `yaml:"up_help,omitempty" json:"up_help,omitempty"`
+	ScrapeDurationHelp  string `yaml:"scrape_duration_help,omitempty" json:"scrape_duration_help,omitempty"`
+	CollectorStatusHelp string `yaml:"collector_status_help,omitempty" json:"collector_status_help,omitempty"`
+	WebListenAddresses  string `yaml:"web.listen-address,omitempty" json:"web.listen-address,omitempty"`
+	LogLevel            string `yaml:"log.level,omitempty" json:"log.level,omitempty"`
+
 	// Catches all undefined fields and must be empty after parsing.
 	XXX map[string]interface{} `yaml:",inline" json:"-"`
 }
@@ -391,6 +397,9 @@ func (g *GlobalConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	g.ExporterName = exporter_name
 	g.MaxConns = 3
 	g.MaxIdleConns = 3
+	g.UpMetricHelp = upMetricHelp
+	g.ScrapeDurationHelp = scrapeDurationHelp
+	g.CollectorStatusHelp = collectorStatusHelp
 
 	type plain GlobalConfig
 	if err := unmarshal((*plain)(g)); err != nil {
@@ -556,7 +565,13 @@ func (t *TargetConfig) Clone(dsn string, auth_name string) (*TargetConfig, error
 		collectors:    t.collectors,
 		ScrapeTimeout: t.ScrapeTimeout,
 	}
-
+	if _, err := BuildConnection(nil,
+		string(new.DSN),
+		t.AuthConfig,
+		nil, true,
+	); err != nil {
+		return nil, err
+	}
 	url_elmt, err := url.Parse(dsn)
 	if err != nil {
 		return nil, err

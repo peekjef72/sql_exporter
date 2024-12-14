@@ -236,9 +236,11 @@ func BuildPasswd(
 	logger.Debug("debug ciphertext",
 		"ciphertext", ciphertext)
 	auth_key := GetMapValueString(symbol_table, "auth_key")
-	logger.Debug(
-		"debug authkey",
-		"auth_key", auth_key)
+	if logger != nil {
+		logger.Debug(
+			"debug authkey",
+			"auth_key", auth_key)
+	}
 	if auth_key == "" {
 		return "", "", fmt.Errorf("password is encrypt and not ciphertext provided (auth_key)")
 	}

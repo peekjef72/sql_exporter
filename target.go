@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
+	"fmt"
 	"log/slog"
 	"reflect"
 	"sort"
@@ -102,23 +103,26 @@ func NewTarget(
 	upDesc := NewAutomaticMetricDesc(
 		logContext,
 		gc.NameSpace+"_up",
-		upMetricHelp,
+		gc.UpMetricHelp,
 		prometheus.GaugeValue,
 		constLabelPairs,
 	)
 
 	scrapeDurationDesc := NewAutomaticMetricDesc(logContext,
 		gc.NameSpace+"_"+scrapeDurationName,
-		scrapeDurationHelp,
+		gc.ScrapeDurationHelp,
 		prometheus.GaugeValue,
 		constLabelPairs,
 	)
 
+	labels := make([]string, 1)
+	labels[0] = "collector"
 	collectorStatusDesc := NewAutomaticMetricDesc(logContext,
 		gc.NameSpace+"_"+collectorStatusName,
-		collectorStatusHelp,
+		gc.CollectorStatusHelp,
 		prometheus.GaugeValue, constLabelPairs,
-		"collectorname")
+		labels...,
+	)
 
 	symbols_table := make(map[string]interface{}, 2)
 
@@ -229,7 +233,7 @@ func (t *target) Collect(ctx context.Context, ch chan<- Metric, health_only bool
 	}
 	if t.config.Name != "" {
 		// Export the target's `up` metric as early as we know what it should be.
-		ch <- NewMetric(t.upDesc, boolToFloat64(targetUp))
+		ch <- NewMetric(t.upDesc, boolToFloat64(targetUp), nil)
 	}
 	if health_only {
 		return
@@ -249,10 +253,27 @@ func (t *target) Collect(ctx context.Context, ch chan<- Metric, health_only bool
 	}
 	// Wait for all collectors (if any) to complete.
 	wg.Wait()
+	t.content_mutex.Lock()
+	logger := t.logger
+	t.content_mutex.Unlock()
+	logger.Debug("collectors have stopped")
 
 	if t.config.Name != "" {
+		// And exporter a `collector execution status` metric for each collector once we're done scraping.
+		if targetUp {
+			labels_name := make([]string, 1)
+			labels_name[0] = "collectorname"
+			labels_value := make([]string, 1)
+			for _, c := range t.collectors {
+				labels_value[0] = c.Name()
+				logger.Debug(
+					fmt.Sprintf("target collector['%s'] has status=%d", labels_value[0], c.Status()),
+					"target", t.config.Name)
+				ch <- NewMetric(t.collectorStatusDesc, float64(c.Status()), labels_value)
+			}
+		}
 		// And export a `scrape duration` metric once we're done scraping.
-		ch <- NewMetric(t.scrapeDurationDesc, float64(time.Since(scrapeStart))*1e-9)
+		ch <- NewMetric(t.scrapeDurationDesc, float64(time.Since(scrapeStart))*1e-9, nil)
 	}
 }
 
@@ -303,6 +324,7 @@ func (t *target) ping(ctx context.Context) error {
 				string(t.config.DSN),
 				t.config.AuthConfig,
 				t.symbols_table,
+				false,
 			); err == nil {
 				t.private_dsn = val
 			} else {
