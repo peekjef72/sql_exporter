@@ -65,6 +65,12 @@ Here a small summary for linux:
   export LD_LIBRARY_PATH=$IBM_DB_HOME/lib:$LD_LIBRARY_PATH
   ```
 
+  for RH 10, libcrypt.so.1 is required and may need to install libxcrypt-compat:
+
+  ```bash
+  dnf install libxcrypt-compat
+  ```
+
   If you have root access you can set path to DB2 dynamic library via ld.so.conf:
 
   ```bash
@@ -402,3 +408,4 @@ The entrypoint "/metrics" accepts the following argument:
 * auth_name=&lt;auth_name&gt; the authentication parameters to use to connect with data_source_name
 * auth_key=&lt;auth_key&gt; the shared key used to decipher encrypted password.
 * health=&lt;true&gt; alter scraping behavior: only return the target connection status metrics; Use to determine if the connection to target is OK or not 1|0.
+* collector=&lt;collector_name&gt;[&amp;collector=&lt;coll_name2&gt;&amp;...] alter scraping behavior; collect specific collectors list, instead of the default defined for the target; usefull to build a specific job with custom metrics with a different scraping interval by example.

@@ -97,14 +97,14 @@ func BuildConnection(
 			if strings.HasPrefix(passwd, "/encrypted/") {
 				if val, auth_key, err := BuildPasswd(logger, passwd, symbol_table); err == nil {
 					params["password"] = val
-					params["auth_key"] = auth_key
+					params["__auth_key"] = auth_key
 				} else {
 					return "", fmt.Errorf("unable to decrypt password")
 				}
-				params["need_auth_key"] = "true"
+				params["__need_auth_key"] = "true"
 			} else {
 				params["password"] = val
-				params["need_auth_key"] = "false"
+				params["__need_auth_key"] = "false"
 			}
 
 			// add params to target symbol table
@@ -142,7 +142,8 @@ func genDSNUrl(driver string, params map[string]string) string {
 
 	param_idx := 0
 	for key, val := range params {
-		if key == "server" || key == "port" {
+		// skip adding parameters 'server', 'port' or name starting with '__'
+		if key == "server" || key == "port" || strings.HasPrefix(key, "__") {
 			continue
 		}
 		if param_idx == 0 {

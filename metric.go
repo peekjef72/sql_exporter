@@ -72,7 +72,12 @@ func NewMetricFamily(logContext []interface{}, mc *MetricConfig, constLabels []*
 func (mf MetricFamily) Collect(row map[string]interface{}, ch chan<- Metric) {
 	labelValues := make([]string, len(mf.labels))
 	for i, label := range mf.config.KeyLabels {
-		labelValues[i] = row[label].(string)
+		if val, ok := row[label]; ok {
+			labelValues[i] = val.(string)
+		} else {
+			mf.logContext = append(mf.logContext, "errmsg", fmt.Sprintf("label '%s", label))
+			labelValues[i] = "<not_found>"
+		}
 	}
 	for _, v := range mf.config.Values {
 		if mf.config.ValueLabel != "" {

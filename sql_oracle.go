@@ -105,14 +105,14 @@ func BuildConnection(
 			if strings.HasPrefix(passwd, "/encrypted/") {
 				if val, auth_key, err := BuildPasswd(logger, passwd, symbol_table); err == nil {
 					params["password"] = val
-					params["auth_key"] = auth_key
+					params["__auth_key"] = auth_key
 				} else {
 					return "", fmt.Errorf("unable to decrypt password")
 				}
-				params["need_auth_key"] = "true"
+				params["__need_auth_key"] = "true"
 			} else {
 				params["password"] = val
-				params["need_auth_key"] = "false"
+				params["__need_auth_key"] = "false"
 			}
 
 			// server, sid := my_split(params["server"], "\\")
@@ -258,11 +258,3 @@ func check_login_error(err error) bool {
 	}
 	return check
 }
-
-// func my_split(s string, c string) (string, string) {
-// 	i := strings.LastIndex(s, c)
-// 	if i < 0 {
-// 		return s, ""
-// 	}
-// 	return s[:i], s[i+len(c):]
-// }

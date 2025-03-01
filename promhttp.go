@@ -75,15 +75,45 @@ func ExporterHandlerFor(exporter Exporter) http.Handler {
 			return
 		}
 
+		// set a specific collector_name for target
+		if len(params["collector"]) > 0 {
+			// to store anc check name unicity
+			colls := make(map[string]*CollectorConfig, len(params["collector"]))
+			for _, collector_name := range params["collector"] {
+				if _, ok := colls[collector_name]; !ok {
+					coll := exporter.Config().FindCollector(collector_name)
+					if coll != nil {
+						exporter.Config().logger.Debug(fmt.Sprintf("adding specific collector %s", collector_name),
+							"target", target.Name())
+						// target.SetSymbol("collector_name", collector_name)
+					} else {
+						err := fmt.Errorf("collector name '%s' not found", collector_name)
+						HandleError(http.StatusNotFound, err, *metricsPath, exporter, w, req)
+						return
+					}
+					colls[collector_name] = coll
+				}
+			}
+			if err := target.SetSpecificCollectorConfig(colls); err != nil {
+				HandleError(http.StatusNotFound, err, *metricsPath, exporter, w, req)
+				return
+			}
+		}
+
 		// set authentication for target if one is specified and it differs from target internal
 		auth_name := params.Get("auth_name")
 		if auth_name != "" && target.Config().AuthName != auth_name {
 			auth := exporter.Config().FindAuthConfig(auth_name)
 			if auth != nil {
+				exporter.Config().logger.Debug(fmt.Sprintf("change authentication to %s", auth_name),
+					"target", target.Name())
 				target.Config().AuthConfig = *auth
 				target.SetSymbol("user", auth.Username)
 				target.SetSymbol("password", string(auth.Password))
 				target.Config().AuthName = auth_name
+			} else {
+				exporter.Config().logger.Warn(fmt.Sprintf("authentication %s not found", auth_name),
+					"target", target.Name())
 			}
 		}
 

@@ -54,6 +54,7 @@ type Config struct {
 	logger     *slog.Logger
 	// collectorName is a restriction: collectors set for a target are replaced by this only one.
 	collectorName string
+	collectors    map[string]*CollectorConfig
 
 	// Catches all undefined fields and must be empty after parsing.
 	XXX map[string]interface{} `yaml:",inline" json:"-"`
@@ -228,6 +229,10 @@ collectors:
 		}
 		tnames[t.Name] = nil
 
+		if t.ScrapeTimeout == 0 {
+			t.ScrapeTimeout = c.Globals.ScrapeTimeout
+		}
+
 		// skip targets with DSN "template"
 		if t.DSN == "template" {
 			continue
@@ -236,11 +241,9 @@ collectors:
 			return fmt.Errorf("duplicate data source definition %q in target %+v", t.Name, t)
 		}
 		dsns[string(t.DSN)] = nil
-
-		if t.ScrapeTimeout == 0 {
-			t.ScrapeTimeout = c.Globals.ScrapeTimeout
-		}
 	}
+	// reserve collector ref;
+	c.collectors = colls
 
 	return checkOverflow(c.XXX, "config")
 }
@@ -252,6 +255,15 @@ func (c *Config) FindAuthConfig(auth_name string) *AuthConfig {
 		return nil
 	}
 	return auth
+}
+
+func (c *Config) FindCollector(collector_name string) *CollectorConfig {
+	var coll *CollectorConfig
+	coll, found := c.collectors[collector_name]
+	if !found {
+		return nil
+	}
+	return coll
 }
 
 type dumpConfig struct {
@@ -316,7 +328,7 @@ func (c *Config) loadCollectorFiles() error {
 			cc := CollectorConfig{}
 			err = yaml.Unmarshal(buf, &cc)
 			if err != nil {
-				return err
+				return fmt.Errorf("collector '%s': %s", cf, err)
 			}
 			cc.fromFile = cf
 			c.Collectors = append(c.Collectors, &cc)
@@ -355,7 +367,7 @@ func (c *Config) loadTargetsFiles(targetFilepath []string) error {
 			target := TargetConfig{}
 			err = yaml.Unmarshal(buf, &target)
 			if err != nil {
-				return err
+				return fmt.Errorf("target file '%s': %s", tf, err)
 			}
 			target.setFromFile(tf)
 			c.Targets = append(c.Targets, &target)
@@ -522,12 +534,16 @@ func (t *TargetConfig) buildDumpTargetconfig() *dumpTargetConfig {
 	if t.targetType == TargetTypeDynamic {
 		name = dsn
 	}
+	collectors := make([]string, len(t.collectors))
+	for idx, coll := range t.collectors {
+		collectors[idx] = coll.Name
+	}
 	return &dumpTargetConfig{
 		Name:          name,
 		DSN:           dsn,
 		ScrapeTimeout: t.ScrapeTimeout,
 		Labels:        t.Labels,
-		CollectorRefs: t.CollectorRefs,
+		CollectorRefs: collectors,
 		TargetsFiles:  t.TargetsFiles,
 		AuthName:      t.AuthName,
 		AuthConfig:    t.AuthConfig,
@@ -560,6 +576,7 @@ func (t *TargetConfig) Clone(dsn string, auth_name string) (*TargetConfig, error
 	new := &TargetConfig{
 		Name:          dsn,
 		DSN:           Secret(dsn),
+		CollectorRefs: t.CollectorRefs,
 		AuthConfig:    t.AuthConfig,
 		Labels:        t.Labels,
 		collectors:    t.collectors,
@@ -734,10 +751,15 @@ func (m *MetricConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 		return fmt.Errorf("unsupported metric type: %s", m.TypeString)
 	}
 
+	m.ValueLabel = strings.ToLower(m.ValueLabel)
+
 	// Check for duplicate key labels
 	for i, li := range m.KeyLabels {
 		checkLabel(li, "metric", m.Name)
+		m.KeyLabels[i] = strings.ToLower(li)
+		li = m.KeyLabels[i]
 		for _, lj := range m.KeyLabels[i+1:] {
+
 			if li == lj {
 				return fmt.Errorf("duplicate key label %q for metric %q", li, m.Name)
 			}
@@ -879,14 +901,14 @@ func resolveCollectorRefs(
 	for _, cref := range collectorRefs {
 		// check if cref(a collector name) is a pattern or not
 		if strings.HasPrefix(cref, "~") {
-			pat := regexp.MustCompile(cref[1:])
+			pat := regexp.MustCompile(strings.TrimSpace(cref[1:]))
 			for c_name, c := range collectors {
 				if pat.MatchString(c_name) {
 					resolved = append(resolved, c)
 				}
 			}
 		} else if strings.HasPrefix(cref, "!~") {
-			pat := regexp.MustCompile(cref[2:])
+			pat := regexp.MustCompile(strings.TrimSpace(cref[2:]))
 			for c_name, c := range collectors {
 				if !pat.MatchString(c_name) {
 					resolved = append(resolved, c)

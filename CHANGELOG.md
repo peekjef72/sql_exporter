@@ -3,6 +3,15 @@ All notable changes to this project will be documented in this file.
 This project adheres to [Semantic Versioning](http://semver.org/) and [Keep a changelog](https://github.com/olivierlacan/keep-a-changelog).
 
  <!--next-version-placeholder-->
+## 0.9.2 / 2025-02-25
+- fixed: label set uppercase on config: converted to lower case, both in config and in query results.
+- fixed: panic when label name set for value is not found in query results.
+- fixed: allow spaces between operator and pattern in collector list for target (e.g.: - ~ oracle_standard.*)
+- fixed: add log message when error found during parsing of target or collector files.
+- added: new parameter for /metric endpoint: collector. allow to collect target only for that collector list (&collector=name1&collector=nameX...)
+- fixed: now constant labels set for targets are used.
+- upgrade to go 1.24
+
 ## 0.9.1 / 2024-12-14
 
 - add for dynamic target a validation of the dsn format, so that invalid one are rejected.

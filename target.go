@@ -38,6 +38,8 @@ type Target interface {
 	SetSymbol(string, any) error
 	DeleteSymbol(key string)
 	GetSymbolTable() map[string]any
+	GetSpecificCollector() []Collector
+	SetSpecificCollectorConfig(coll map[string]*CollectorConfig) error
 	SetLogger(*slog.Logger)
 	Lock()
 	Unlock()
@@ -64,8 +66,24 @@ type target struct {
 	// to store the final dsn instead of recompe it each time
 	private_dsn string
 
+	// user specific collector reference
+	collector_config    map[string]*CollectorConfig
+	specific_collectors []Collector
+
 	// to protect the data during exchange
 	content_mutex *sync.Mutex
+}
+
+func build_ConstantLabels(labels map[string]string) []*dto.LabelPair {
+	constLabelPairs := make([]*dto.LabelPair, 0, len(labels))
+	for n, v := range labels {
+		constLabelPairs = append(constLabelPairs, &dto.LabelPair{
+			Name:  proto.String(n),
+			Value: proto.String(v),
+		})
+	}
+	sort.Sort(labelPairSorter(constLabelPairs))
+	return constLabelPairs
 }
 
 // NewTarget returns a new Target with the given instance name, data source name, collectors and constant labels.
@@ -82,15 +100,7 @@ func NewTarget(
 		logContext = append(logContext, "target", tpar.Name)
 	}
 
-	constLabelPairs := make([]*dto.LabelPair, 0, len(tpar.Labels))
-	for n, v := range constLabels {
-		constLabelPairs = append(constLabelPairs, &dto.LabelPair{
-			Name:  proto.String(n),
-			Value: proto.String(v),
-		})
-	}
-	sort.Sort(labelPairSorter(constLabelPairs))
-
+	constLabelPairs := build_ConstantLabels(tpar.Labels)
 	collectors := make([]Collector, 0, len(ccs))
 	for _, cc := range ccs {
 		c, err := NewCollector(logContext, logger, cc, constLabelPairs)
@@ -195,6 +205,61 @@ func (t *target) DeleteSymbol(key string) {
 	delete(t.symbols_table, key)
 }
 
+func (t *target) GetSpecificCollector() []Collector {
+	if t.collector_config != nil {
+		return t.specific_collectors
+	}
+	return nil
+}
+
+func (t *target) SetSpecificCollectorConfig(colls map[string]*CollectorConfig) error {
+	t.collector_config = colls
+
+	if len(colls) > 0 {
+		coll_list := make([]Collector, 0, len(colls))
+		var (
+			constLabelPairs []*dto.LabelPair
+			err             error
+		)
+		t.content_mutex.Lock()
+		logger := t.logger
+		t.content_mutex.Unlock()
+
+		for coll_name, coll_config := range colls {
+			// there was no previous specific collectors... build list
+			if t.specific_collectors == nil {
+				constLabelPairs = build_ConstantLabels(t.config.Labels)
+				coll, err := NewCollector(t.logContext, logger, coll_config, constLabelPairs)
+				if err != nil {
+					return err
+				}
+				coll_list = append(coll_list, coll)
+				// else has previous, need to check if name found in list
+			} else {
+				for _, coll := range t.specific_collectors {
+					if coll.Name() != coll_name {
+						if constLabelPairs == nil {
+							constLabelPairs = build_ConstantLabels(t.config.Labels)
+						}
+						coll, err = NewCollector(t.logContext, logger, coll_config, constLabelPairs)
+						if err != nil {
+							return err
+						}
+					}
+					coll_list = append(coll_list, coll)
+				}
+			}
+		}
+		if len(coll_list) > 0 {
+			t.specific_collectors = coll_list
+		} else {
+			t.specific_collectors = nil
+		}
+	}
+	return nil
+
+}
+
 func (t *target) SetLogger(logger *slog.Logger) {
 	t.content_mutex.Lock()
 	t.logger = logger
@@ -240,10 +305,18 @@ func (t *target) Collect(ctx context.Context, ch chan<- Metric, health_only bool
 	}
 
 	var wg sync.WaitGroup
+	var colls []Collector
+
 	// Don't bother with the collectors if target is down.
 	if targetUp {
-		wg.Add(len(t.collectors))
-		for _, c := range t.collectors {
+		if colls = t.GetSpecificCollector(); colls != nil {
+			t.SetSpecificCollectorConfig(nil)
+		} else {
+			colls = t.collectors
+		}
+
+		wg.Add(len(colls))
+		for _, c := range colls {
 			// If using a single DB connection, collectors will likely run sequentially anyway. But we might have more.
 			go func(collector Collector) {
 				defer wg.Done()
@@ -264,7 +337,7 @@ func (t *target) Collect(ctx context.Context, ch chan<- Metric, health_only bool
 			labels_name := make([]string, 1)
 			labels_name[0] = "collectorname"
 			labels_value := make([]string, 1)
-			for _, c := range t.collectors {
+			for _, c := range colls {
 				labels_value[0] = c.Name()
 				logger.Debug(
 					fmt.Sprintf("target collector['%s'] has status=%d", labels_value[0], c.Status()),
@@ -283,16 +356,16 @@ func (t *target) hasChangedAuthKey() bool {
 	// if set else do nothing
 	params := GetMapValueMap(t.symbols_table, "params")
 	if params != nil {
-		need_auth_key = GetMapValueString(params, "need_auth_key")
+		need_auth_key = GetMapValueString(params, "__need_auth_key")
 		if need_auth_key == "false" {
 			return res
 		}
-		old_auth_key = GetMapValueString(params, "auth_key")
+		old_auth_key = GetMapValueString(params, "__auth_key")
 	} else {
 		// probably first call to ping...
 		res = true
 	}
-	auth_key = GetMapValueString(t.symbols_table, "auth_key")
+	auth_key = GetMapValueString(t.symbols_table, "__auth_key")
 	// it has changed, so reset the dsn value so it can be recomputed
 	if auth_key != old_auth_key {
 		res = true

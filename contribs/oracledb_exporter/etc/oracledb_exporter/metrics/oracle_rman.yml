@@ -1,0 +1,210 @@
+collector_name: oracle_rman
+namespace: oracledb_rman
+metrics:
+  #backup
+  - metric_name: backup_duration_seconds
+    type: gauge
+    help: 'db backup duration in seconds by backup id and session type. labeled by start and end time'
+    key_labels:
+      - session_key
+      - BACKUP_TYPE
+      - start_time
+      - end_time 
+    values:
+      - backup_duration_seconds
+    query_ref: rman_backup
+
+  - metric_name: backup_size
+    type: gauge
+    help: 'db backup size in bytes by backup id and session type'
+    key_labels:
+      - session_key
+      - BACKUP_TYPE
+    values:
+      - out_size_bytes
+    query_ref: rman_backup
+
+  - metric_name: backup_status
+    type: gauge
+    help: 'db backup status by backup id and session type:  0:FAILED - 1:COMPLETED - 2:COMPLETED WITH WARNINGS - 3:COMPLETED WITH ERRORS - 4:RUNNING WITH WARNINGS - 5:RUNNING WITH ERRORS'
+    key_labels:
+      - session_key
+      - BACKUP_TYPE
+    values:
+      - status
+    query_ref: rman_backup
+
+  # *****************
+  - metric_name: backup_last_timestamp
+    type: gauge
+    help: 'unix timestamp in second of the last backup indexed by backup type'
+    key_labels:
+      - backup_type
+    values:
+      - last_start_ts
+    query_ref: last_backup
+
+  # - metric_name: backup_last_duration_seconds
+  #   type: gauge
+  #   help: 'number of second since last backup indexed by backup type'
+  #   key_labels:
+  #     - backup_type
+  #   values:
+  #     - last_backup_seconds
+  #   query_ref: last_backup
+  #     with cte as (
+  #       select
+  #         max(START_TIME) last_bckup,
+  #         INPUT_TYPE as BACKUP_TYPE
+  #       from V$RMAN_BACKUP_JOB_DETAILS
+  #       group by INPUT_TYPE
+  #     )
+  #     select (sysdate - last_bckup) * 86400 as last_backup_seconds, BACKUP_TYPE
+  #     from cte
+
+  - metric_name: backup_last_size_bytes
+    type: gauge
+    help: 'number of bytes output in last backup indexed by backup type'
+    key_labels:
+      - session_key
+      - backup_type
+    values:
+      - last_backup_bytes
+    query_ref:
+      last_backup
+    # query:
+    #   with cte as (
+    #     select 
+    #       SESSION_KEY, 
+    #       RANK () OVER( PARTITION by INPUT_TYPE order by START_TIME DESC) as R_NUM
+    #       from V$RMAN_BACKUP_JOB_DETAILS
+    #   )
+    #   select OUTPUT_BYTES AS last_backup_bytes,
+    #     cte.SESSION_KEY,
+    #     INPUT_TYPE as BACKUP_TYPE
+    #   from cte
+    #   join V$RMAN_BACKUP_JOB_DETAILS bck on cte.SESSION_KEY = bck.SESSION_KEY
+    #   where cte.R_NUM = 1
+
+  - metric_name: backup_last_status
+    type: gauge
+    help: 'db backup status by backup id and session type:  0:FAILED - 1:COMPLETED - 2:COMPLETED WITH WARNINGS - 3:COMPLETED WITH ERRORS - 4:RUNNING WITH WARNINGS - 5:RUNNING WITH ERRORS'
+    key_labels:
+      - session_key
+      - BACKUP_TYPE
+    values:
+      - last_status
+    query_ref:
+      last_backup
+
+
+
+
+
+# backup status
+# 0 FAILED
+# 1 COMPLETED
+# 2 COMPLETED WITH WARNINGS
+# 3 COMPLETED WITH ERRORS
+# 4 RUNNING WITH WARNINGS
+# 5 RUNNING WITH ERRORS
+queries:
+  # Populates rman_backup: last 10 backup from each type
+  - query_name: rman_backup
+    query: |
+      with backups as (
+        select 
+          SESSION_KEY,
+          RANK () OVER( PARTITION by INPUT_TYPE order by START_TIME DESC) as R_NUM
+          from V$RMAN_BACKUP_JOB_DETAILS
+      )
+      SELECT bck.session_key,
+        input_type as BACKUP_TYPE,
+        CASE status
+          WHEN 'COMPLETED' THEN 1
+          WHEN 'COMPLETED WITH WARNINGS' THEN 2
+          WHEN 'COMPLETED WITH ERRORS' THEN 3
+          WHEN 'FAILED' THEN 0
+          WHEN 'RUNNING WITH WARNINGS' THEN 4
+          WHEN 'RUNNING WITH ERRORS' THEN 5
+        END AS status,
+        TO_CHAR(start_time,'YYYY/MM/DD hh24:mi') AS start_time,
+        TO_CHAR(end_time, 'YYYY/MM/DD hh24:mi') AS end_time,
+        -- output_device_type,
+        elapsed_seconds AS backup_duration_seconds,
+        -- input_bytes AS in_size_bytes,
+        output_bytes AS out_size_bytes
+      from backups bck
+      join V$RMAN_BACKUP_JOB_DETAILS rawb on bck.session_key = rawb.session_key
+      where bck.R_NUM <= 10
+
+    # with bck_type as (
+    #   select distinct input_type as BACKUP_TYPE
+    #   from v$rman_backup_job_details
+    # ),
+    #   backups as (
+    #   SELECT session_key,
+    #     input_type as BACKUP_TYPE,
+    #     CASE status
+    #       WHEN 'COMPLETED' THEN 1
+    #       WHEN 'COMPLETED WITH WARNINGS' THEN 2
+    #       WHEN 'COMPLETED WITH ERRORS' THEN 3
+    #       WHEN 'FAILED' THEN 0
+    #       WHEN 'RUNNING WITH WARNINGS' THEN 4
+    #       WHEN 'RUNNING WITH ERRORS' THEN 5
+    #     END AS status,
+    #     TO_CHAR(start_time,'YYYY/MM/DD hh24:mi') AS start_time,
+    #     TO_CHAR(end_time, 'YYYY/MM/DD hh24:mi') AS end_time,
+    #     output_device_type,
+    #     elapsed_seconds AS backup_duration_seconds,
+    #     input_bytes AS in_size_bytes,
+    #     output_bytes AS out_size_bytes
+    #   FROM   v$rman_backup_job_details
+    #   WHERE
+    #     rownum <= 10
+    #   ORDER BY start_time desc
+    # )
+    # SELECT *
+    # FROM bck_type bt
+    # JOIN backups b on bt.backup_type = b.backup_type
+
+    # WHERE
+
+  - query_name: last_backup
+    query: |
+      with cte as (
+        select 
+          SESSION_KEY, 
+          RANK () OVER( PARTITION by INPUT_TYPE order by START_TIME DESC) as R_NUM
+          from V$RMAN_BACKUP_JOB_DETAILS
+      )
+      select
+        cte.SESSION_KEY,
+        INPUT_TYPE as BACKUP_TYPE,
+        (cast( (cast(start_time as timestamp with time zone) at time zone 'UTC') as date) 
+          - date '1970-01-01')  * 86400 as last_start_ts,
+        -- (sysdate - start_time) * 86400 as last_backup_seconds
+        OUTPUT_BYTES AS last_backup_bytes,
+        CASE status
+          WHEN 'COMPLETED' THEN 1
+          WHEN 'COMPLETED WITH WARNINGS' THEN 2
+          WHEN 'COMPLETED WITH ERRORS' THEN 3
+          WHEN 'FAILED' THEN 0
+          WHEN 'RUNNING WITH WARNINGS' THEN 4
+          WHEN 'RUNNING WITH ERRORS' THEN 5
+        END AS last_status
+      from cte
+      join V$RMAN_BACKUP_JOB_DETAILS bck on cte.SESSION_KEY = bck.SESSION_KEY
+      where cte.R_NUM = 1
+
+
+#        (cast( SYS_EXTRACT_UTC(FROM_TZ( cast(start_time as timestamp), 'Europe/Paris')) at time zone 'UTC' as dat
+# e) - date '1970-01-01') * 86400 as utc_ts,
+
+
+# select
+#   ((cast(start_time as timestamp with time zone) at time zone 'UTC') - date '1970-01-01') * 86400 as utc_ts,
+#   start_time
+#   from  V$RMAN_BACKUP_JOB_DETAILS
+#   where SESSION_KEY = 8940
+# /
