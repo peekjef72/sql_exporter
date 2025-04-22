@@ -62,7 +62,7 @@ type target struct {
 	conn   *sql.DB
 	logger *slog.Logger
 
-	symbols_table map[string]interface{}
+	symbol_table map[string]interface{}
 	// to store the final dsn instead of recompe it each time
 	private_dsn string
 
@@ -134,7 +134,7 @@ func NewTarget(
 		labels...,
 	)
 
-	symbols_table := make(map[string]interface{}, 2)
+	symbol_table := make(map[string]interface{}, 2)
 
 	t := target{
 		config: tpar,
@@ -147,7 +147,7 @@ func NewTarget(
 		collectorStatusDesc: collectorStatusDesc,
 		logContext:          logContext,
 		logger:              logger,
-		symbols_table:       symbols_table,
+		symbol_table:        symbol_table,
 		content_mutex:       &sync.Mutex{},
 	}
 	return &t, nil
@@ -171,7 +171,7 @@ func (t *target) Config() *TargetConfig {
 //
 // May be unitary key (.attribute) or sequence (.attr1.attr2.[...])
 func (t *target) SetSymbol(key string, value any) error {
-	symtab := t.symbols_table
+	symtab := t.symbol_table
 	if r_val, ok := symtab[key]; ok {
 		vDst := reflect.ValueOf(r_val)
 		if vDst.Kind() == reflect.Map {
@@ -198,11 +198,11 @@ func (t *target) SetSymbol(key string, value any) error {
 }
 
 func (t *target) GetSymbolTable() map[string]any {
-	return t.symbols_table
+	return t.symbol_table
 }
 
 func (t *target) DeleteSymbol(key string) {
-	delete(t.symbols_table, key)
+	delete(t.symbol_table, key)
 }
 
 func (t *target) GetSpecificCollector() []Collector {
@@ -320,7 +320,7 @@ func (t *target) Collect(ctx context.Context, ch chan<- Metric, health_only bool
 			// If using a single DB connection, collectors will likely run sequentially anyway. But we might have more.
 			go func(collector Collector) {
 				defer wg.Done()
-				collector.Collect(ctx, t.conn, t.symbols_table, ch)
+				collector.Collect(ctx, t.conn, t.symbol_table, ch)
 			}(c)
 		}
 	}
@@ -354,7 +354,7 @@ func (t *target) hasChangedAuthKey() bool {
 	var auth_key, old_auth_key, need_auth_key string
 	res := false
 	// if set else do nothing
-	params := GetMapValueMap(t.symbols_table, "params")
+	params := GetMapValueMap(t.symbol_table, "params")
 	if params != nil {
 		need_auth_key = GetMapValueString(params, "__need_auth_key")
 		if need_auth_key == "false" {
@@ -365,7 +365,7 @@ func (t *target) hasChangedAuthKey() bool {
 		// probably first call to ping...
 		res = true
 	}
-	auth_key = GetMapValueString(t.symbols_table, "__auth_key")
+	auth_key = GetMapValueString(t.symbol_table, "__auth_key")
 	// it has changed, so reset the dsn value so it can be recomputed
 	if auth_key != old_auth_key {
 		res = true
@@ -396,7 +396,7 @@ func (t *target) ping(ctx context.Context) error {
 			if val, err := BuildConnection(t.logger,
 				string(t.config.DSN),
 				t.config.AuthConfig,
-				t.symbols_table,
+				t.symbol_table,
 				false,
 			); err == nil {
 				t.private_dsn = val
@@ -442,8 +442,10 @@ func (t *target) ping(ctx context.Context) error {
 	}
 
 	if ctx.Err() != nil {
-		t.conn.Close()
-		t.conn = nil
+		if t.conn != nil {
+			t.conn.Close()
+			t.conn = nil
+		}
 		return ErrorWrap(t.logContext, ctx.Err())
 	}
 	return nil

@@ -131,13 +131,13 @@ func setColumnType(logContext []interface{}, columnName string, ctype columnType
 func (q *Query) Collect(
 	ctx context.Context,
 	conn *sql.DB,
-	symbols_table map[string]interface{},
+	symbol_table map[string]interface{},
 	ch chan<- Metric) {
 	if ctx.Err() != nil {
 		ch <- NewInvalidMetric(q.logContext, ctx.Err())
 		return
 	}
-	rows, err := q.run(ctx, conn, symbols_table)
+	rows, err := q.run(ctx, conn, symbol_table)
 	if err != nil {
 		// TODO: increment an error counter
 		ch <- NewInvalidMetric(q.logContext, err)
@@ -173,7 +173,7 @@ func (q *Query) Collect(
 func (q *Query) run(
 	ctx context.Context,
 	conn *sql.DB,
-	symbols_table map[string]interface{}) (*sql.Rows, error) {
+	symbol_table map[string]interface{}) (*sql.Rows, error) {
 	if q.conn != nil && q.conn != conn {
 		q.conn = nil
 		q.stmt.Close()
@@ -194,7 +194,7 @@ func (q *Query) run(
 				return nil, ErrorWrap(logCtxt, err)
 			}
 			b := new(strings.Builder)
-			err = tmpl.Execute(b, &symbols_table)
+			err = tmpl.Execute(b, &symbol_table)
 			if err != nil {
 				var logCtxt []interface{}
 				logCtxt = append(logCtxt, q.logContext...)

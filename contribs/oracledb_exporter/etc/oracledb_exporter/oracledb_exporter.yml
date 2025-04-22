@@ -42,11 +42,10 @@ targets:
     #   user: myuser
     #   password: "/encrypted/base64_encrypted_password_by_passwd_crypt_cmd"
     collectors:
-      - oracle_standard
       - ~oracle_pdbs.*
 
   - targets_files: [ "targets/*.yml" ]
 
 # Collector files specifies a list of globs. One collector definition is read from each matching file.
 collector_files: 
-  - "metrics/*.collector.yml"
+  - metrics/oracle_*.yml

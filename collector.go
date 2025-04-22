@@ -113,7 +113,7 @@ func (c *collector) SetStatus(status int) {
 func (c *collector) Collect(
 	ctx context.Context,
 	conn *sql.DB,
-	symbols_table map[string]interface{},
+	symbol_table map[string]interface{},
 	ch chan<- Metric) {
 	var (
 		wg sync.WaitGroup
@@ -124,7 +124,7 @@ func (c *collector) Collect(
 	for _, q := range c.queries {
 		go func(q *Query) {
 			defer wg.Done()
-			q.Collect(ctx, conn, symbols_table, ch)
+			q.Collect(ctx, conn, symbol_table, ch)
 		}(q)
 	}
 	// Only return once all queries have been processed
@@ -185,7 +185,7 @@ func (cc *cachingCollector) SetStatus(status int) {
 func (cc *cachingCollector) Collect(
 	ctx context.Context,
 	conn *sql.DB,
-	symbols_table map[string]interface{},
+	symbol_table map[string]interface{},
 	ch chan<- Metric) {
 	if ctx.Err() != nil {
 		ch <- NewInvalidMetric(cc.rawColl.logContext, ctx.Err())
@@ -207,7 +207,7 @@ func (cc *cachingCollector) Collect(
 			cacheChan := make(chan Metric, capMetricChan)
 			cc.cache = make([]Metric, 0, len(cc.cache))
 			go func() {
-				cc.rawColl.Collect(ctx, conn, symbols_table, cacheChan)
+				cc.rawColl.Collect(ctx, conn, symbol_table, cacheChan)
 				close(cacheChan)
 			}()
 			for metric := range cacheChan {

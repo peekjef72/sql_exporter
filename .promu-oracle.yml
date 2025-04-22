@@ -1,9 +1,8 @@
 go:
-    cgo: true
+    cgo: false
 repository:
     path: github.com/peekjef72/sql_exporter
 build:
-    static: false
     binaries:
         - name: cmd/oracledb_exporter
           path: .

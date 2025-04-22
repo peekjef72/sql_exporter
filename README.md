@@ -65,12 +65,6 @@ Here a small summary for linux:
   export LD_LIBRARY_PATH=$IBM_DB_HOME/lib:$LD_LIBRARY_PATH
   ```
 
-  for RH 10, libcrypt.so.1 is required and may need to install libxcrypt-compat:
-
-  ```bash
-  dnf install libxcrypt-compat
-  ```
-
   If you have root access you can set path to DB2 dynamic library via ld.so.conf:
 
   ```bash

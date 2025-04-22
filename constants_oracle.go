@@ -10,5 +10,5 @@ const (
 	metricsPublishingPort = ":9161"
 	exporter_name         = "oracledb_exporter"
 	configEnvName         = "ORACLEDB_CONFIG"
-	driver_name           = "oci8"
+	driver_name           = "oracle"
 )

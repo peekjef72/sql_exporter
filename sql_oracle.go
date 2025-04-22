@@ -5,10 +5,13 @@ package main
 import (
 	"fmt"
 	"log/slog"
-	"net/url"
+
+	// "net/url"
+	"strconv"
 	"strings"
 
-	_ "github.com/mattn/go-oci8"
+	// _ "github.com/mattn/go-oci8"
+	go_ora "github.com/sijms/go-ora/v2"
 	// register the Oracle OCI-8 driver
 )
 
@@ -49,7 +52,7 @@ func BuildConnection(
 	idx := strings.Index(dsn, "://")
 	if idx == -1 {
 		//return nil, fmt.Errorf("missing driver in data source name. Expected format `<driver>://<dsn>`")
-		driver = "oci8"
+		driver = "oracle"
 	} else {
 		driver = dsn[:idx]
 	}
@@ -138,7 +141,44 @@ func BuildConnection(
 					delete(params, "database")
 				}
 			}
+			port := 1531
+			if params["port"] != "" {
+				if val, err := strconv.Atoi(params["port"]); err == nil {
+					port = val
+				} else {
+					return "", fmt.Errorf("invalid value for port %s", err.Error())
+				}
+			}
+			opts := make(map[string]string)
 
+			service := ""
+			if _, ok := params["database"]; ok {
+				service = params["database"]
+			} else {
+				opts["SID"] = params["instance"]
+			}
+			for key, val := range params {
+				switch key {
+				case "server":
+				case "port":
+				case "user id":
+				case "password":
+				case "instance":
+				case "database":
+				case "__auth_key":
+				case "__need_auth_key":
+
+				default:
+					opts[key] = val
+				}
+			}
+			dsn = go_ora.BuildUrl(params["server"],
+				port,
+				service,
+				params["user id"],
+				params["password"],
+				opts,
+			)
 			// oci8.ParseDSN
 			// <user id>/<password>@(DESCRIPTION =
 			//		(ADDRESS =
@@ -150,85 +190,85 @@ func BuildConnection(
 			//			(SID = <service name>)
 			//		)
 			// )
-			new_dns := new(strings.Builder)
-			// user
-			new_dns.WriteString(url.QueryEscape(params["user id"]))
-			new_dns.WriteString("/")
-			// password
-			new_dns.WriteString(url.QueryEscape(params["password"]))
-			new_dns.WriteString("@")
+			// new_dns := new(strings.Builder)
+			// // user
+			// new_dns.WriteString(url.QueryEscape(params["user id"]))
+			// new_dns.WriteString("/")
+			// // password
+			// new_dns.WriteString(url.QueryEscape(params["password"]))
+			// new_dns.WriteString("@")
 
-			// DESCRIPTION
-			new_dns.WriteString("(DESCRIPTION = ")
+			// // DESCRIPTION
+			// new_dns.WriteString("(DESCRIPTION = ")
 
-			//	ADDRESS
-			new_dns.WriteString("(ADDRESS =")
+			// //	ADDRESS
+			// new_dns.WriteString("(ADDRESS =")
 
-			// Protocol
-			new_dns.WriteString("(PROTOCOL = ")
+			// // Protocol
+			// new_dns.WriteString("(PROTOCOL = ")
 
-			if params["protocol"] != "" {
-				new_dns.WriteString(strings.ToUpper(params["protocol"]))
-			} else {
-				new_dns.WriteString("TCP")
-			}
-			new_dns.WriteString(") ")
+			// if params["protocol"] != "" {
+			// 	new_dns.WriteString(strings.ToUpper(params["protocol"]))
+			// } else {
+			// 	new_dns.WriteString("TCP")
+			// }
+			// new_dns.WriteString(") ")
 
-			// Hostname
-			new_dns.WriteString("(HOST =")
-			new_dns.WriteString(params["server"])
-			new_dns.WriteString(") ")
+			// // Hostname
+			// new_dns.WriteString("(HOST =")
+			// new_dns.WriteString(params["server"])
+			// new_dns.WriteString(") ")
 
-			// Port
-			new_dns.WriteString(" ( PORT=")
-			if params["port"] != "" {
-				new_dns.WriteString(params["port"])
-			} else {
-				new_dns.WriteString("1531")
-			}
-			new_dns.WriteString(")")
+			// // Port
+			// new_dns.WriteString(" ( PORT=")
+			// if params["port"] != "" {
+			// 	new_dns.WriteString(params["port"])
+			// } else {
+			// 	new_dns.WriteString("1531")
+			// }
+			// new_dns.WriteString(")")
 
-			// END ADDRESS
-			new_dns.WriteString(") ")
+			// // END ADDRESS
+			// new_dns.WriteString(") ")
 
-			// SID or SERVICE_NAME
-			new_dns.WriteString("(CONNECT_DATA = (")
-			if _, ok := params["database"]; ok {
-				new_dns.WriteString(" SERVICE_NAME = ")
-				new_dns.WriteString(params["database"])
-			} else {
-				new_dns.WriteString(" SID = ")
-				new_dns.WriteString(params["instance"])
-			}
-			new_dns.WriteString("))")
+			// // SID or SERVICE_NAME
+			// new_dns.WriteString("(CONNECT_DATA = (")
+			// if _, ok := params["database"]; ok {
+			// 	new_dns.WriteString(" SERVICE_NAME = ")
+			// 	new_dns.WriteString(params["database"])
+			// } else {
+			// 	new_dns.WriteString(" SID = ")
+			// 	new_dns.WriteString(params["instance"])
+			// }
+			// new_dns.WriteString("))")
 
-			// END DESCRIPTION
-			new_dns.WriteString(")")
+			// // END DESCRIPTION
+			// new_dns.WriteString(")")
 
-			new_dns.WriteString("?")
-			// others params
-			var params_list = []string{
-				"loc",
-				"isolation",
-				"questionph",
-				"prefetch_rows",
-				"prefetch_memory",
-				"as",
-				"stmt_cache_size",
-			}
-			for _, param := range params_list {
-				val, err := params[param]
-				if err {
-					new_dns.WriteString(param)
-					new_dns.WriteString("=")
-					if params["protocol"] != "" {
-						new_dns.WriteString(val)
-						new_dns.WriteString("&")
-					}
-				}
-			}
+			// new_dns.WriteString("?")
+			// // others params
+			// var params_list = []string{
+			// 	"loc",
+			// 	"isolation",
+			// 	"questionph",
+			// 	"prefetch_rows",
+			// 	"prefetch_memory",
+			// 	"as",
+			// 	"stmt_cache_size",
+			// }
+			// for _, param := range params_list {
+			// 	val, err := params[param]
+			// 	if err {
+			// 		new_dns.WriteString(param)
+			// 		new_dns.WriteString("=")
+			// 		if params["protocol"] != "" {
+			// 			new_dns.WriteString(val)
+			// 			new_dns.WriteString("&")
+			// 		}
+			// 	}
+			// }
 
-			dsn = new_dns.String()
+			// dsn = new_dns.String()
 			// add params to target symbol table
 			symbol_table["params"] = params
 		}

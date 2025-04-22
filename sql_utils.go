@@ -12,43 +12,6 @@ import (
 	"github.com/peekjef72/passwd_encrypt/encrypt"
 )
 
-func OpenConnection(
-	ctx context.Context,
-	logContext []interface{},
-	logger *slog.Logger,
-	driver string,
-	dsn string,
-	maxConns, maxIdleConns int,
-) (*sql.DB, error) {
-
-	// Open the DB handle in a separate goroutine so we can terminate early if the context closes.
-	var (
-		conn *sql.DB
-		err  error
-		ch   = make(chan error)
-	)
-	go func() {
-		conn, err = sql.Open(driver, dsn)
-		close(ch)
-	}()
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case <-ch:
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	conn.SetMaxIdleConns(maxIdleConns)
-	conn.SetMaxOpenConns(maxConns)
-
-	logContext = append(logContext, "msg", fmt.Sprintf("Database handle successfully opened with driver %s.", driver))
-	logger.Debug("msg_stack",
-		logContext...)
-	return conn, nil
-}
-
 // PingDB is a wrapper around sql.DB.PingContext() that terminates as soon as the context is closed.
 //
 // sql.DB does not actually pass along the context to the driver when opening a connection (which always happens if the
